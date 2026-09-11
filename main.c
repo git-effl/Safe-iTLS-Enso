@@ -15,7 +15,7 @@ static SceUID ioOpenPatched(const char *file, int flags, SceMode mode) {
             file = "uma0:itls/libhttp.suprx";
         } else if (strstr(file, "vs0:sys/external/libssl.suprx")) {
             file = "uma0:itls/libssl.suprx";
-        } else if (strstr(file, "vs0:/data/external/webcore/ScePsp2Compat.suprx")) {
+        } else if (strstr(file, "vs0:data/external/webcore/ScePsp2Compat.suprx")) {
             file = "uma0:itls/ScePsp2Compat.suprx";
         } else if (strstr(file, "vs0:sys/external/np_commerce2.suprx")) {
             file = "uma0:itls/np_commerce2.suprx";
