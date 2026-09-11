@@ -20,13 +20,10 @@ jobs:
 
       - name: Build Plugin
         run: |
-          mkdir build
-          cd build
-          cmake ..
           make
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-            name: safe-itls-enso
+            name: safe-itls-enso-plugin
             path: build/*.skprx
