@@ -1,4 +1,4 @@
-TARGET = itls_plugin
+TARGET = safe-itls-enso
 OBJS   = main.o
 
 LIBS = -ltaihen_stub -lSceLibKernel_stub
