@@ -23,7 +23,7 @@ Requirements:
 - An official update file
 - The Plugin
 
-1. Get your [official update file](http://deu01.psv.update.playstation.net/update/psv/image/2022_0209/rel_f2c7b12fe85496ec88a0391b514d6e3b/PSVUPDAT.PUP) and the plugin from the releases.
+1. Get your [official update file](http://deu01.psv.update.playstation.net/update/psv/image/2022_0209/rel_f2c7b12fe85496ec88a0391b514d6e3b/PSVUPDAT.PUP) and the plugin from the releases,if you use a SD2Vita,use 1.00 uma0 version,if not use normal 1.00.
 2. Put it somewhere on your SD/Memory Card.
 3. Vitashell/MolecularShell/EnsoShell.
 4. Start FTP.
