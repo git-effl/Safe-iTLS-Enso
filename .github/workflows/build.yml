@@ -1,0 +1,32 @@
+name: Build Safe iTLS-Enso
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  release:
+    types: [published]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: vitasdk/vitasdk:latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Build Plugin
+        run: |
+          mkdir build
+          cd build
+          cmake ..
+          make
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+            name: safe-itls-enso-plugin
+            path: build/*.skprx
