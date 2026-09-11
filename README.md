@@ -1,8 +1,8 @@
-## Safe iTLS-Enso 
+# Safe iTLS-Enso 
 
 A Plugin that intercepts TLS calls from vs0: to ux0:,a safer option to the original iTLS-Enso.
 
-# How to build
+## How to build
 
 Requirements:
 
@@ -14,7 +14,7 @@ Requirements:
 2. Run ```make```
 3. You're done
 
-# Setup:
+## Setup:
 
 Requirements:
 
@@ -39,5 +39,5 @@ ur0:tai/safe-itls-enso.skprx```
 12. Put all the Files you got from your firmware file to your card directory/data/itls
 13. Reboot your console and you're done!
 
-License:
+## License
 Licensed under GPL3,see LICENSE for more details.
