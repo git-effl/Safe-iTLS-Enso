@@ -1,6 +1,6 @@
 # Safe iTLS-Enso 
 
-A Plugin that intercepts TLS calls from vs0: to ux0:,a safer option to the original iTLS-Enso.
+A Plugin that intercepts TLS calls from vs0: to ux0: or uma0:,a safer option to the original iTLS-Enso.
 
 ## How to build
 
@@ -36,7 +36,7 @@ ur0:tai/safe-itls-enso.skprx```
 9. Get files libhttp.suprx,libhttp.suprx,np_commerce2.suprx,np_commerce2.suprx from your card directory/sys/external
 10. Get File ScePsp2Compat.suprx from your card directory/data/external/webcore
 11. Get the file CA_LIST.cer from your card directory/data/external/cert/
-12. Put all the Files you got from your firmware file to your card directory/data/itls
+12. Put all the Files you got from your firmware file to your card directory/itls
 13. Reboot your console and you're done!
 
 ## License
