@@ -15,10 +15,10 @@ static SceUID ioOpenPatched(const char *file, int flags, SceMode mode) {
             file = "ux0:itls/libhttp.suprx";
         } else if (strstr(file, "vs0:sys/external/libssl.suprx")) {
             file = "ux0:itls/libssl.suprx";
-        } else if (strstr(file, "vs0:/data/external/webcore/ScePsp2Compat.suprx")) {
+        } else if (strstr(file, "vs0:data/external/webcore/ScePsp2Compat.suprx")) {
             file = "ux0:itls/ScePsp2Compat.suprx";
         } else if (strstr(file, "vs0:sys/external/np_commerce2.suprx")) {
-            file = "ux0:data/itls/np_commerce2.suprx";
+            file = "ux0:itls/np_commerce2.suprx";
         } else if (strstr(file, "vs0:data/external/cert/CA_LIST.cer")) {
             file = "ux0:itls/CA_LIST.cer";
         }
