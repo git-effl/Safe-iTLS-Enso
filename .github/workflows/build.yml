@@ -2,9 +2,9 @@ name: Build Safe iTLS-Enso
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "main-uma0" ]
   pull_request:
-    branches: [ "main", "master" ]
+    branches: [ "main", "master", "main-uma0" ]
   release:
     types: [published]
 
@@ -28,7 +28,7 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-            name: safe-itls-enso-plugin
+            name: safe-itls-enso-plugin-${{ github.ref_name }}
             path: |
               *.skprx
               */*.skprx
