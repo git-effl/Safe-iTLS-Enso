@@ -6,7 +6,7 @@
 #include "redirect.h"
 
 #define PLUGIN_NAME "Safe-iTLS-Enso Kernel Plugin"
-#define PLUGIN_VERSION "1.0.0"
+#define PLUGIN_VERSION "1.1.0"
 
 static SceUID s_hook_load_module = -1;
 static SceUID s_hook_io_open = -1;
@@ -15,14 +15,14 @@ static tai_hook_ref_t s_ref_io_open;
 
 /**
  * @brief Hooked sceKernelLoadStartModuleForPid
- * Intercepts userland and system requests to load obsolete vs0: SSL/HTTP modules
- * and dynamically rewrites them to point to the modern modules on the SD card (uma0:/ux0:).
+ * Intercepts module load requests from userland/system processes and strictly redirects
+ * ONLY the 5 allowed target files to the storage card (uma0:/ux0:).
  */
 static SceUID sceKernelLoadStartModuleForPid_patched(SceUID pid, const char *path, SceSize args, void *argp, int flags, SceKernelLMOption *option, int *status) {
     char redirected_path[MAX_PATH_LEN];
 
     if (path && redirect_resolve_path(path, redirected_path, sizeof(redirected_path))) {
-        ksceDebugPrintf("[Safe-iTLS] Redirecting module load: %s -> %s (pid: 0x%08X)\n",
+        ksceDebugPrintf("[Safe-iTLS] Redirecting module: %s -> %s (pid: 0x%08X)\n",
                         path, redirected_path, pid);
         return TAI_CONTINUE(SceUID, s_ref_load_module, pid, redirected_path, args, argp, flags, option, status);
     }
@@ -32,13 +32,14 @@ static SceUID sceKernelLoadStartModuleForPid_patched(SceUID pid, const char *pat
 
 /**
  * @brief Hooked ksceIoOpen
- * Intercepts low-level file open calls targeting vs0: certificates and modules.
+ * Intercepts file open requests and strictly redirects ONLY the 5 allowed target files
+ * (including CA_LIST.cer root certificate bundle and modules) to the storage card.
  */
 static SceUID ksceIoOpen_patched(const char *file, int flags, SceMode mode) {
     char redirected_file[MAX_PATH_LEN];
 
     if (file && redirect_resolve_path(file, redirected_file, sizeof(redirected_file))) {
-        ksceDebugPrintf("[Safe-iTLS] Redirecting I/O open: %s -> %s\n", file, redirected_file);
+        ksceDebugPrintf("[Safe-iTLS] Redirecting file open: %s -> %s\n", file, redirected_file);
         return TAI_CONTINUE(SceUID, s_ref_io_open, redirected_file, flags, mode);
     }
 
@@ -53,23 +54,26 @@ int module_start(SceSize argc, const void *args) {
 
     ksceDebugPrintf("===================================================\n");
     ksceDebugPrintf(" %s (v%s)\n", PLUGIN_NAME, PLUGIN_VERSION);
-    ksceDebugPrintf(" Safe TLS Redirection to Storage Media (Zero vs0: writes)\n");
+    ksceDebugPrintf(" Strict 5-Target TLS Redirection (Zero vs0: writes)\n");
     ksceDebugPrintf("===================================================\n");
 
-    /* Initialize storage detection on SD card (uma0: -> ux0:) */
+    /* Initialize storage card probing (uma0: -> ux0:) */
     redirect_init();
 
     RedirectStatus status;
     redirect_get_status(&status);
 
     if (status.active_target == REDIRECT_TARGET_NONE) {
-        ksceDebugPrintf("[Safe-iTLS] Warning: No extracted modules found on uma0: or ux0:!\n");
-        ksceDebugPrintf("[Safe-iTLS] Please run Safe-iTLS Companion App to extract firmware.\n");
+        ksceDebugPrintf("[Safe-iTLS] Notice: No extracted modules found on card.\n");
+        ksceDebugPrintf("[Safe-iTLS] Run Safe-iTLS Companion App to extract firmware update.\n");
     } else {
-        ksceDebugPrintf("[Safe-iTLS] Active redirection target: %s\n", status.base_dir);
-        ksceDebugPrintf("[Safe-iTLS] - libssl.suprx: %s\n", status.libssl_available ? "YES" : "NO");
-        ksceDebugPrintf("[Safe-iTLS] - libhttp.suprx: %s\n", status.libhttp_available ? "YES" : "NO");
-        ksceDebugPrintf("[Safe-iTLS] - ca-bundle.pem: %s\n", status.cert_available ? "YES" : "NO");
+        ksceDebugPrintf("[Safe-iTLS] Storage medium: %s\n", status.base_dir);
+        for (int i = 0; i < TARGET_FILE_COUNT; i++) {
+            ksceDebugPrintf("[Safe-iTLS] [%d/5] %s: %s\n",
+                            i + 1,
+                            status.items[i].card_filename,
+                            status.items[i].available ? "READY (CARD)" : "MISSING (VS0 FALLBACK)");
+        }
     }
 
     /* Hook SceKernelModulemgr (sceKernelLoadStartModuleForPid) */
@@ -92,7 +96,7 @@ int module_start(SceSize argc, const void *args) {
         ksceIoOpen_patched
     );
 
-    ksceDebugPrintf("[Safe-iTLS] Hooks installed: ModuleMgr=0x%08X, IoMgr=0x%08X\n",
+    ksceDebugPrintf("[Safe-iTLS] Kernel hooks active: ModuleMgr=0x%08X, IoMgr=0x%08X\n",
                     s_hook_load_module, s_hook_io_open);
 
     return SCE_KERNEL_START_SUCCESS;

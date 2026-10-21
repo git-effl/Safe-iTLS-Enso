@@ -11,41 +11,49 @@
 #define SD2VITA_ITLS_DIR "uma0:data/itls"
 #define MEMCARD_ITLS_DIR "ux0:data/itls"
 
-/* System modules to be redirected to SD card */
-#define SYS_LIBSSL_PATH  "vs0:sys/external/libssl.suprx"
-#define SYS_LIBHTTP_PATH "vs0:sys/external/libhttp.suprx"
-#define SYS_CERT_DIR     "vs0:data/external/cert"
+/*
+ * The EXACT 5 target files allowed for redirection:
+ * 1. vs0:sys/external/libssl.suprx
+ * 2. vs0:sys/external/libhttp.suprx
+ * 3. vs0:/data/external/webcore/ScePsp2Compat.suprx
+ * 4. vs0:sys/external/np_commerce2.suprx
+ * 5. vs0:data/external/cert/CA_LIST.cer
+ * NO OTHER FILES SHALL BE REDIRECTED.
+ */
+
+#define TARGET_FILE_COUNT 5
+
+typedef struct {
+    const char *orig_pattern_1; /* e.g. "vs0:sys/external/libssl.suprx" */
+    const char *orig_pattern_2; /* with or without leading slash e.g. "vs0:/sys/external/libssl.suprx" */
+    const char *card_filename;  /* e.g. "libssl.suprx" */
+    bool available;
+    uint32_t redirect_count;
+} RedirectItem;
 
 typedef enum {
     REDIRECT_TARGET_NONE = 0,
-    REDIRECT_TARGET_SD2VITA,   /* uma0:/data/itls */
-    REDIRECT_TARGET_MEMCARD    /* ux0:/data/itls */
+    REDIRECT_TARGET_SD2VITA,   /* uma0:data/itls */
+    REDIRECT_TARGET_MEMCARD    /* ux0:data/itls */
 } RedirectTarget;
 
 typedef struct {
     RedirectTarget active_target;
     char base_dir[64];
-    bool libssl_available;
-    bool libhttp_available;
-    bool cert_available;
-    uint32_t redirect_count;
+    RedirectItem items[TARGET_FILE_COUNT];
+    uint32_t total_redirects;
     uint32_t fallback_count;
 } RedirectStatus;
 
 /**
- * @brief Initialize redirect table and probe available storage media on SD card.
- * Priority: uma0: (SD2Vita) -> ux0: (Memory Card).
+ * @brief Initialize redirect table and probe storage card.
+ * Priority: uma0:data/itls -> ux0:data/itls.
  */
 int redirect_init(void);
 
 /**
- * @brief Check if given path targets a redirected TLS module or certificate,
- * and if the replacement exists on the SD card, rewrite output_path.
- *
- * @param orig_path Original system path requested by application (e.g. vs0:sys/external/libssl.suprx).
- * @param output_path Buffer to store redirected path (e.g. uma0:data/itls/libssl.suprx).
- * @param max_len Maximum length of output_path.
- * @return true if redirection was performed, false if path should use original vs0: source.
+ * @brief Checks if given path targets one of the EXACT 5 allowed files.
+ * If verified on card, rewrites to card path. Otherwise returns false.
  */
 bool redirect_resolve_path(const char *orig_path, char *output_path, size_t max_len);
 
@@ -55,7 +63,7 @@ bool redirect_resolve_path(const char *orig_path, char *output_path, size_t max_
 void redirect_get_status(RedirectStatus *status);
 
 /**
- * @brief Re-probe storage card if card state changes.
+ * @brief Re-probe storage card.
  */
 void redirect_refresh_storage(void);
 

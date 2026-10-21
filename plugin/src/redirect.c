@@ -2,7 +2,49 @@
 #include <psp2kern/kernel/clib.h>
 #include <psp2kern/io/stat.h>
 
-static RedirectStatus s_status = {0};
+static RedirectStatus s_status = {
+    .active_target = REDIRECT_TARGET_NONE,
+    .base_dir = "",
+    .items = {
+        {
+            .orig_pattern_1 = "vs0:sys/external/libssl.suprx",
+            .orig_pattern_2 = "vs0:/sys/external/libssl.suprx",
+            .card_filename  = "libssl.suprx",
+            .available      = false,
+            .redirect_count = 0
+        },
+        {
+            .orig_pattern_1 = "vs0:sys/external/libhttp.suprx",
+            .orig_pattern_2 = "vs0:/sys/external/libhttp.suprx",
+            .card_filename  = "libhttp.suprx",
+            .available      = false,
+            .redirect_count = 0
+        },
+        {
+            .orig_pattern_1 = "vs0:data/external/webcore/ScePsp2Compat.suprx",
+            .orig_pattern_2 = "vs0:/data/external/webcore/ScePsp2Compat.suprx",
+            .card_filename  = "ScePsp2Compat.suprx",
+            .available      = false,
+            .redirect_count = 0
+        },
+        {
+            .orig_pattern_1 = "vs0:sys/external/np_commerce2.suprx",
+            .orig_pattern_2 = "vs0:/sys/external/np_commerce2.suprx",
+            .card_filename  = "np_commerce2.suprx",
+            .available      = false,
+            .redirect_count = 0
+        },
+        {
+            .orig_pattern_1 = "vs0:data/external/cert/CA_LIST.cer",
+            .orig_pattern_2 = "vs0:/data/external/cert/CA_LIST.cer",
+            .card_filename  = "CA_LIST.cer",
+            .available      = false,
+            .redirect_count = 0
+        }
+    },
+    .total_redirects = 0,
+    .fallback_count = 0
+};
 
 static bool file_exists_kernel(const char *path) {
     if (!path || path[0] == '\0') return false;
@@ -11,45 +53,46 @@ static bool file_exists_kernel(const char *path) {
     return (res >= 0 && stat.st_size > 0);
 }
 
-static void probe_target_directory(const char *dir, RedirectTarget target) {
+static bool probe_directory(const char *dir, RedirectTarget target) {
+    int available_count = 0;
     char test_path[MAX_PATH_LEN];
 
-    ksceClibSnprintf(test_path, sizeof(test_path), "%s/libssl.suprx", dir);
-    bool has_ssl = file_exists_kernel(test_path);
+    for (int i = 0; i < TARGET_FILE_COUNT; i++) {
+        ksceClibSnprintf(test_path, sizeof(test_path), "%s/%s", dir, s_status.items[i].card_filename);
+        bool exists = file_exists_kernel(test_path);
+        s_status.items[i].available = exists;
+        if (exists) {
+            available_count++;
+        }
+    }
 
-    ksceClibSnprintf(test_path, sizeof(test_path), "%s/libhttp.suprx", dir);
-    bool has_http = file_exists_kernel(test_path);
-
-    ksceClibSnprintf(test_path, sizeof(test_path), "%s/ca-bundle.pem", dir);
-    bool has_cert = file_exists_kernel(test_path);
-
-    if (has_ssl || has_http || has_cert) {
+    if (available_count > 0) {
         s_status.active_target = target;
         ksceClibStrncpy(s_status.base_dir, dir, sizeof(s_status.base_dir) - 1);
-        s_status.libssl_available = has_ssl;
-        s_status.libhttp_available = has_http;
-        s_status.cert_available = has_cert;
+        return true;
     }
+
+    return false;
 }
 
 void redirect_refresh_storage(void) {
     s_status.active_target = REDIRECT_TARGET_NONE;
     s_status.base_dir[0] = '\0';
-    s_status.libssl_available = false;
-    s_status.libhttp_available = false;
-    s_status.cert_available = false;
+
+    for (int i = 0; i < TARGET_FILE_COUNT; i++) {
+        s_status.items[i].available = false;
+    }
 
     /* 1. Priority: Probe SD2Vita (uma0:data/itls) */
-    probe_target_directory(SD2VITA_ITLS_DIR, REDIRECT_TARGET_SD2VITA);
+    if (probe_directory(SD2VITA_ITLS_DIR, REDIRECT_TARGET_SD2VITA)) {
+        return;
+    }
 
     /* 2. Fallback: Probe Official Memory Card (ux0:data/itls) */
-    if (s_status.active_target == REDIRECT_TARGET_NONE) {
-        probe_target_directory(MEMCARD_ITLS_DIR, REDIRECT_TARGET_MEMCARD);
-    }
+    probe_directory(MEMCARD_ITLS_DIR, REDIRECT_TARGET_MEMCARD);
 }
 
 int redirect_init(void) {
-    ksceClibMemset(&s_status, 0, sizeof(s_status));
     redirect_refresh_storage();
     return 0;
 }
@@ -57,42 +100,43 @@ int redirect_init(void) {
 bool redirect_resolve_path(const char *orig_path, char *output_path, size_t max_len) {
     if (!orig_path || !output_path || max_len == 0) return false;
 
-    /* If no SD card target with valid extracted modules is available, fallback to vs0: */
+    /* If no storage card directory has extracted modules, pass through to vs0: */
     if (s_status.active_target == REDIRECT_TARGET_NONE) {
         s_status.fallback_count++;
         return false;
     }
 
-    /* Check for libssl.suprx redirection */
-    if (ksceClibStrstr(orig_path, "vs0:sys/external/libssl.suprx") != NULL ||
-        ksceClibStrstr(orig_path, "vs0:/sys/external/libssl.suprx") != NULL) {
-        if (s_status.libssl_available) {
-            ksceClibSnprintf(output_path, max_len, "%s/libssl.suprx", s_status.base_dir);
-            s_status.redirect_count++;
-            return true;
+    /*
+     * STRICT FILTER:
+     * Check ONLY against the 5 specified target files:
+     * 1. vs0:sys/external/libssl.suprx
+     * 2. vs0:sys/external/libhttp.suprx
+     * 3. vs0:/data/external/webcore/ScePsp2Compat.suprx
+     * 4. vs0:sys/external/np_commerce2.suprx
+     * 5. vs0:data/external/cert/CA_LIST.cer
+     *
+     * DO NOT REDIRECT ANY OTHER SYSTEM FILES.
+     */
+    for (int i = 0; i < TARGET_FILE_COUNT; i++) {
+        if (ksceClibStrstr(orig_path, s_status.items[i].orig_pattern_1) != NULL ||
+            ksceClibStrstr(orig_path, s_status.items[i].orig_pattern_2) != NULL) {
+
+            /* File matched one of the 5 targets! Verify presence on storage card */
+            if (s_status.items[i].available) {
+                ksceClibSnprintf(output_path, max_len, "%s/%s",
+                                 s_status.base_dir, s_status.items[i].card_filename);
+                s_status.items[i].redirect_count++;
+                s_status.total_redirects++;
+                return true;
+            } else {
+                /* Target file missing on card; safe fallback to original vs0: */
+                s_status.fallback_count++;
+                return false;
+            }
         }
     }
 
-    /* Check for libhttp.suprx redirection */
-    if (ksceClibStrstr(orig_path, "vs0:sys/external/libhttp.suprx") != NULL ||
-        ksceClibStrstr(orig_path, "vs0:/sys/external/libhttp.suprx") != NULL) {
-        if (s_status.libhttp_available) {
-            ksceClibSnprintf(output_path, max_len, "%s/libhttp.suprx", s_status.base_dir);
-            s_status.redirect_count++;
-            return true;
-        }
-    }
-
-    /* Check for system SSL root certificates redirection */
-    if (ksceClibStrstr(orig_path, "vs0:data/external/cert") != NULL ||
-        ksceClibStrstr(orig_path, "vs0:/data/external/cert") != NULL) {
-        if (s_status.cert_available) {
-            ksceClibSnprintf(output_path, max_len, "%s/ca-bundle.pem", s_status.base_dir);
-            s_status.redirect_count++;
-            return true;
-        }
-    }
-
+    /* Any other path: strictly NOT redirected */
     return false;
 }
 

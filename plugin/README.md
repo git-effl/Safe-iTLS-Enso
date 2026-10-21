@@ -4,28 +4,24 @@ A taiHEN kernel plugin that intercepts PlayStation Vita TLS and HTTP module load
 
 ---
 
-## Why "Safe" iTLS-Enso?
+## Strict 5-Target Redirection Filter
 
-Traditional iTLS installations permanently replaced `libssl.suprx` and `libhttp.suprx` on `vs0:` (the PlayStation Vita's protected OS partition). If `vs0:` was corrupted, the console could fail to boot or require a factory reflash.
+The kernel plugin strictly intercepts and redirects ONLY these 5 system targets:
 
-**Safe-iTLS-Enso makes ZERO modifications to `vs0:`.**
-- All system partitions remain 100% factory original and read-only.
-- The kernel plugin dynamically hooks module loading in memory.
-- If the SD card is removed or unmounted, the plugin safely falls back to standard system libraries without crashing.
+1. `vs0:sys/external/libssl.suprx` -> `<card>/data/itls/libssl.suprx`
+2. `vs0:sys/external/libhttp.suprx` -> `<card>/data/itls/libhttp.suprx`
+3. `vs0:/data/external/webcore/ScePsp2Compat.suprx` -> `<card>/data/itls/ScePsp2Compat.suprx`
+4. `vs0:sys/external/np_commerce2.suprx` -> `<card>/data/itls/np_commerce2.suprx`
+5. `vs0:data/external/cert/CA_LIST.cer` -> `<card>/data/itls/CA_LIST.cer`
+
+**Zero other files are affected.**
 
 ---
 
-## How it Works
+## Zero `vs0:` Modifications Guarantee
 
-1. **Storage Probe:**
-   - On boot, the plugin checks for extracted firmware components:
-     1. Priority: `uma0:data/itls/` (SD2Vita / USB adapter)
-     2. Fallback: `ux0:data/itls/` (Official Sony Memory Card)
-2. **taiHEN Kernel Hooks:**
-   - `SceKernelModulemgr` (`sceKernelLoadStartModuleForPid`): When an application or system process loads `vs0:sys/external/libssl.suprx` or `vs0:sys/external/libhttp.suprx`, the path is transparently rewritten to the SD card.
-   - `SceIofilemgr` (`ksceIoOpen`): File opens for system root certificates (`vs0:data/external/cert/`) are redirected to `ca-bundle.pem` on the SD card.
-3. **Safety Fallback:**
-   - If the target file on the SD card is missing, truncated, or unreadable, the hook passes through to the original `vs0:` file.
+- **No OS partition writes:** `vs0:` remains 100% factory read-only.
+- **Safety Fallback:** If the SD card is removed or unmounted, the plugin automatically falls back to standard system files without crashing or bootlooping.
 
 ---
 
@@ -37,5 +33,5 @@ Traditional iTLS installations permanently replaced `libssl.suprx` and `libhttp.
    *KERNEL
    ur0:tai/itls.skprx
    ```
-3. Ensure the extracted modules are present in `uma0:/data/itls` or `ux0:/data/itls` (use the **Safe-iTLS Companion App** to download and extract them using Vita hardware acceleration).
+3. Run **Safe-iTLS Companion App** to download and hardware-decrypt the 5 modules.
 4. Reboot the PS Vita.
