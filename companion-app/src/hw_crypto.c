@@ -3,6 +3,13 @@
 #include <string.h>
 
 /*
+ * Forward-declare sceSblDmac5EncDecKeyGen (exported by SceSblDmac5Mgr / SceSblSsMgr_stub,
+ * NID 0x5BF4F924) so compilation succeeds on VitaSDK releases whose <psp2/dmac5.h> predates
+ * the prototype addition as well as newer VitaSDK releases (identical redeclaration is valid C11).
+ */
+int sceSblDmac5EncDecKeyGen(const SceSblDmac5EncDecParam *param, SceUInt32 key_id, SceUInt32 command);
+
+/*
  * PS Vita DMAC5 (Bigmac) AES-128-CBC Decrypt Command Word (from <psp2/dmac5.h>):
  *   bit 1 (2)  = Decrypt
  *   bit 3 (8)  = CBC mode
