@@ -33,7 +33,6 @@ target_include_directories(${PROJECT_NAME} PRIVATE src)
 target_link_libraries(${PROJECT_NAME}
     SceDisplay_stub
     SceNet_stub
-    SceNetCtl_stub
     SceCtrl_stub
     ScePower_stub
     SceRtc_stub

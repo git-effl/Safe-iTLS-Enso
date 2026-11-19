@@ -1,7 +1,6 @@
 #include "downloader.h"
 #include <psp2/sysmodule.h>
 #include <psp2/net/net.h>
-#include <psp2/net/netctl.h>
 #include <psp2/io/fcntl.h>
 #include <psp2/rtc.h>
 #include <stdio.h>
@@ -157,9 +156,8 @@ int downloader_init(void) {
     }
 
     /*
-     * Load ONLY SCE_SYSMODULE_NET (never SCE_SYSMODULE_HTTP / libhttp.suprx).
-     * Avoids relying on the system libhttp.suprx that Safe-iTLS-Enso replaces,
-     * and avoids SceNetPsForSyscalls / SceShellSvc dependencies.
+     * Load ONLY SCE_SYSMODULE_NET and initialize SceNet directly.
+     * Avoids SceLibHttp (libhttp.suprx) and unused SceNetCtl (libnetctl.suprx / NID 0xD943CE15).
      */
     int res = sceSysmoduleLoadModule(SCE_SYSMODULE_NET);
     if (res < 0) {
@@ -181,16 +179,6 @@ int downloader_init(void) {
 
     res = sceNetInit(&net_param);
     if (res < 0) {
-        free(s_net_memory);
-        s_net_memory = NULL;
-        sceSysmoduleUnloadModule(SCE_SYSMODULE_NET);
-        s_sysmod_net_loaded = false;
-        return res;
-    }
-
-    res = sceNetCtlInit();
-    if (res < 0) {
-        sceNetTerm();
         free(s_net_memory);
         s_net_memory = NULL;
         sceSysmoduleUnloadModule(SCE_SYSMODULE_NET);
@@ -313,7 +301,7 @@ int downloader_fetch_pup(const char *url, const char *destination_path,
         int req_len = snprintf(req_buf, sizeof(req_buf),
                                "GET %s HTTP/1.1\r\n"
                                "Host: %s\r\n"
-                               "User-Agent: Safe-iTLS-Companion/1.2.2\r\n"
+                               "User-Agent: Safe-iTLS-Companion/1.2.3\r\n"
                                "Accept: */*\r\n"
                                "Connection: close\r\n"
                                "\r\n",
@@ -566,7 +554,6 @@ void downloader_term(void) {
         return;
     }
 
-    sceNetCtlTerm();
     sceNetTerm();
 
     if (s_net_memory) {

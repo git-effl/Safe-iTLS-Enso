@@ -74,7 +74,7 @@ static void on_extract_progress(const PupExtractProgress *progress, void *userda
 static void draw_partition_menu(void) {
     psvDebugScreenClear(0x000000);
     psvDebugScreenPrintf("***************************************************\n");
-    psvDebugScreenPrintf("  Safe-iTLS-Enso Firmware Installer (v1.2.2)\n");
+    psvDebugScreenPrintf("  Safe-iTLS-Enso Firmware Installer (v1.2.3)\n");
     psvDebugScreenPrintf("  Official Sony Server Download & Hardware Decrypt\n");
     psvDebugScreenPrintf("***************************************************\n\n");
     psvDebugScreenPrintf(" Decryption:      Hardware Bigmac DMAC5 (Keyslot 0x20)\n");
