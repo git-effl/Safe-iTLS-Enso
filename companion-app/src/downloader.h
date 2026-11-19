@@ -32,7 +32,8 @@ typedef struct {
 typedef void (*DownloadProgressCallback)(const DownloadProgress *progress, void *userdata);
 
 /**
- * @brief Initialize PS Vita Network and HTTP subsystems (SceNet, SceNetCtl, SceHttp, SceSsl).
+ * @brief Initialize PS Vita Network subsystem (SceNet + SceNetCtl) for raw HTTP/1.1 TCP streaming.
+ *        Does not load vs0:sys/external/libhttp.suprx.
  */
 int downloader_init(void);
 

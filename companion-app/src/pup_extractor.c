@@ -192,7 +192,20 @@ int pup_extract_target_modules(const char *pup_path, const char *output_dir,
              */
             size_t aligned_len = ((size_t)r / AES_BLOCK_SIZE) * AES_BLOCK_SIZE;
             if (aligned_len > 0) {
-                hw_crypto_hardware_decrypt_pup(io_buffer, dec_buffer, aligned_len, iv);
+                int dec_res = hw_crypto_hardware_decrypt_pup(io_buffer, dec_buffer, aligned_len, iv);
+                if (dec_res < 0) {
+                    sceIoClose(out_fd);
+                    sceIoRemove(out_path);
+                    free(io_buffer);
+                    free(dec_buffer);
+                    sceIoClose(fd);
+                    progress.status = PUP_EXTRACT_ERROR;
+                    progress.error_code = dec_res;
+                    snprintf(progress.error_message, sizeof(progress.error_message),
+                             "DMAC5 hardware decrypt failed (0x%08X)", (unsigned int)dec_res);
+                    if (callback) callback(&progress, userdata);
+                    return dec_res;
+                }
                 if ((size_t)r > aligned_len) {
                     memcpy(dec_buffer + aligned_len, io_buffer + aligned_len, (size_t)r - aligned_len);
                 }

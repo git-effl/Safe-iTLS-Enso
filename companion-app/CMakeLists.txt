@@ -34,7 +34,6 @@ target_link_libraries(${PROJECT_NAME}
     SceDisplay_stub
     SceNet_stub
     SceNetCtl_stub
-    SceHttp_stub
     SceCtrl_stub
     ScePower_stub
     SceRtc_stub

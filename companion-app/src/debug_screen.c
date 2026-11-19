@@ -230,6 +230,23 @@ static void put_char(char ch) {
     s_cursor_x += GLYPH_W;
 }
 
+static void present_fb(void) {
+    if (!s_fb) {
+        return;
+    }
+
+    SceDisplayFrameBuf fb;
+    memset(&fb, 0, sizeof(fb));
+    fb.size        = sizeof(SceDisplayFrameBuf);
+    fb.base        = s_fb;
+    fb.pitch       = SCREEN_PITCH;
+    fb.pixelformat = SCE_DISPLAY_PIXELFORMAT_A8B8G8R8;
+    fb.width       = SCREEN_WIDTH;
+    fb.height      = SCREEN_HEIGHT;
+
+    sceDisplaySetFrameBuf(&fb, SCE_DISPLAY_SETBUF_NEXTFRAME);
+}
+
 int psvDebugScreenInit(void) {
     if (s_fb) {
         return 0;
@@ -253,17 +270,6 @@ int psvDebugScreenInit(void) {
 
     s_fb = (uint32_t *)base;
     psvDebugScreenClear(0x000000);
-
-    SceDisplayFrameBuf fb;
-    memset(&fb, 0, sizeof(fb));
-    fb.size        = sizeof(SceDisplayFrameBuf);
-    fb.base        = s_fb;
-    fb.pitch       = SCREEN_PITCH;
-    fb.pixelformat = SCE_DISPLAY_PIXELFORMAT_A8B8G8R8;
-    fb.width       = SCREEN_WIDTH;
-    fb.height      = SCREEN_HEIGHT;
-
-    sceDisplaySetFrameBuf(&fb, SCE_DISPLAY_SETBUF_NEXTFRAME);
     return 0;
 }
 
@@ -280,6 +286,8 @@ void psvDebugScreenClear(uint32_t color) {
     for (size_t i = 0; i < total_pixels; i++) {
         s_fb[i] = s_bg_color;
     }
+
+    present_fb();
 }
 
 int psvDebugScreenPrintf(const char *format, ...) {
@@ -301,6 +309,7 @@ int psvDebugScreenPrintf(const char *format, ...) {
         put_char(buf[i]);
     }
 
+    present_fb();
     return len;
 }
 

@@ -17,7 +17,6 @@ OBJS     = $(SOURCES:.c=.o)
 LIBS     = -lSceDisplay_stub \
            -lSceNet_stub \
            -lSceNetCtl_stub \
-           -lSceHttp_stub \
            -lSceCtrl_stub \
            -lScePower_stub \
            -lSceRtc_stub \
