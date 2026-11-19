@@ -1,19 +1,16 @@
 #include <psp2/kernel/processmgr.h>
-#include <psp2/kernel/clib.h>
+#include <psp2/kernel/threadmgr.h>
 #include <psp2/ctrl.h>
 #include <psp2/power.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "debug_screen.h"
 #include "storage.h"
 #include "downloader.h"
 #include "hw_crypto.h"
 #include "pup_extractor.h"
-
-void psvDebugScreenInit(void);
-void psvDebugScreenPrintf(const char *format, ...);
-void psvDebugScreenClear(int color);
 
 typedef enum {
     INSTALLER_STATE_READY = 0,
@@ -36,11 +33,16 @@ static void on_download_progress(const DownloadProgress *progress, void *userdat
                  progress->progress_percent,
                  (unsigned long long)(progress->downloaded_bytes / (1024 * 1024)),
                  progress->speed_kb_s,
-                 progress->eta_seconds);
+                 (unsigned int)progress->eta_seconds);
+        psvDebugScreenPrintf("\r    %s", s_status_line);
     } else if (progress->status == DOWNLOAD_STATUS_CONNECTING) {
         snprintf(s_status_line, sizeof(s_status_line), "Connecting to official PlayStation Update Server...");
+        psvDebugScreenPrintf("    %s\n", s_status_line);
+    } else if (progress->status == DOWNLOAD_STATUS_COMPLETED) {
+        psvDebugScreenPrintf("\n");
     } else if (progress->status == DOWNLOAD_STATUS_ERROR) {
         snprintf(s_status_line, sizeof(s_status_line), "Download error: %s", progress->error_message);
+        psvDebugScreenPrintf("\n[-] %s\n", s_status_line);
     }
 }
 
@@ -49,30 +51,57 @@ static void on_extract_progress(const PupExtractProgress *progress, void *userda
     if (progress->status == PUP_EXTRACT_HARDWARE_DECRYPT) {
         snprintf(s_status_line, sizeof(s_status_line),
                  "Hardware Decrypting [%u/%u]: %s (%.1f%%)",
-                 progress->current_target_index,
-                 progress->total_targets,
+                 (unsigned int)progress->current_target_index,
+                 (unsigned int)progress->total_targets,
                  progress->current_target_name,
                  progress->progress_percent);
+        psvDebugScreenPrintf("    %s\n", s_status_line);
     } else if (progress->status == PUP_EXTRACT_COMPLETED) {
         snprintf(s_status_line, sizeof(s_status_line), "Extraction Completed! Modules ready for Safe-iTLS.");
     } else if (progress->status == PUP_EXTRACT_ERROR) {
         snprintf(s_status_line, sizeof(s_status_line), "Extraction error: %s", progress->error_message);
+        psvDebugScreenPrintf("[-] %s\n", s_status_line);
     }
+}
+
+static void draw_ready_screen(void) {
+    psvDebugScreenClear(0x000000);
+    psvDebugScreenPrintf("***************************************************\n");
+    psvDebugScreenPrintf("  Safe-iTLS-Enso Firmware Installer (v1.1.1)\n");
+    psvDebugScreenPrintf("  Official Sony Server Download & Hardware Decrypt\n");
+    psvDebugScreenPrintf("***************************************************\n\n");
+    psvDebugScreenPrintf(" Storage Target:  %s (%s)\n",
+                         s_storage.itls_dir,
+                         s_storage.is_sd2vita ? "SD2Vita uma0:" : "Official Card ux0:");
+    psvDebugScreenPrintf(" Decryption:      Hardware Bigmac DMAC5 (Keyslot 0x20)\n");
+    psvDebugScreenPrintf(" Software Keys:   NONE (0%% key exposure)\n");
+    psvDebugScreenPrintf(" vs0: Safety:     100%% Untouched (Zero vs0: writes)\n\n");
+    psvDebugScreenPrintf(" Exact 5 Target Files to Extract:\n");
+    psvDebugScreenPrintf("   1. vs0:sys/external/libssl.suprx\n");
+    psvDebugScreenPrintf("   2. vs0:sys/external/libhttp.suprx\n");
+    psvDebugScreenPrintf("   3. vs0:/data/external/webcore/ScePsp2Compat.suprx\n");
+    psvDebugScreenPrintf("   4. vs0:sys/external/np_commerce2.suprx\n");
+    psvDebugScreenPrintf("   5. vs0:data/external/cert/CA_LIST.cer\n\n");
+    psvDebugScreenPrintf(" Controls:\n");
+    psvDebugScreenPrintf("   [X]     - Download from Sony & Extract Using Hardware\n");
+    psvDebugScreenPrintf("   [START] - Exit to LiveArea\n\n");
+    psvDebugScreenPrintf(" Status: %s\n", s_status_line);
 }
 
 static void run_installer(void) {
     psvDebugScreenClear(0x000000);
     psvDebugScreenPrintf("===================================================\n");
-    psvDebugScreenPrintf(" French Fries\n");
-    psvDebugScreenPrintf(" Installer for Safe-iTLS\n");
+    psvDebugScreenPrintf(" Safe-iTLS-Enso Firmware Installer\n");
+    psvDebugScreenPrintf(" Zero vs0: Modifications - Hardware Bigmac Decrypt\n");
     psvDebugScreenPrintf("===================================================\n\n");
 
-    /* Step 1: Storage Detection */
+    /* Step 1: Storage Detection & Directory Creation */
     psvDebugScreenPrintf("[*] Detecting storage medium...\n");
     if (storage_detect_target(&s_storage) < 0) {
         psvDebugScreenPrintf("[-] Warning: Failed to query storage! Defaulting to ux0:\n");
-        strncpy(s_storage.itls_dir, "ux0:/data/itls", sizeof(s_storage.itls_dir));
+        snprintf(s_storage.itls_dir, sizeof(s_storage.itls_dir), "ux0:/data/itls");
     }
+    storage_make_dir_recursive(s_storage.itls_dir);
     psvDebugScreenPrintf("[+] Target Directory: %s (%s)\n\n",
                          s_storage.itls_dir,
                          s_storage.is_sd2vita ? "SD2Vita uma0:" : "Memory Card ux0:");
@@ -87,6 +116,7 @@ static void run_installer(void) {
     int dl_res = downloader_fetch_pup(OFFICIAL_PUP_URL, s_pup_path, on_download_progress, NULL);
     if (dl_res < 0) {
         psvDebugScreenPrintf("[-] Download failed! Please check your network connection.\n");
+        psvDebugScreenPrintf("Press START, (X), or (O) to exit to LiveArea.\n");
         s_state = INSTALLER_STATE_ERROR;
         return;
     }
@@ -107,11 +137,12 @@ static void run_installer(void) {
     int ext_res = pup_extract_target_modules(s_pup_path, s_storage.itls_dir, on_extract_progress, NULL);
     if (ext_res < 0) {
         psvDebugScreenPrintf("[-] Extraction failed.\n");
+        psvDebugScreenPrintf("Press START, (X), or (O) to exit to LiveArea.\n");
         s_state = INSTALLER_STATE_ERROR;
         return;
     }
 
-    psvDebugScreenPrintf("[+] Extraction & Decryption complete!\n");
+    psvDebugScreenPrintf("\n[+] Extraction & Decryption complete!\n");
     psvDebugScreenPrintf("[+] Temporary PUP file deleted to free storage space.\n\n");
     psvDebugScreenPrintf("---------------------------------------------------\n");
     psvDebugScreenPrintf(" All 5 modules are installed in: %s\n", s_storage.itls_dir);
@@ -133,7 +164,7 @@ int main(int argc, char *argv[]) {
     (void)argc;
     (void)argv;
 
-    /* Prevent Vita from sleeping during download / decryption */
+    /* Boost clocks during download and hardware decryption */
     scePowerSetArmClockFrequency(444);
     scePowerSetBusClockFrequency(222);
 
@@ -144,6 +175,8 @@ int main(int argc, char *argv[]) {
     memset(&pad, 0, sizeof(pad));
     memset(&old_pad, 0, sizeof(old_pad));
 
+    draw_ready_screen();
+
     bool running = true;
     while (running) {
         old_pad = pad;
@@ -151,28 +184,6 @@ int main(int argc, char *argv[]) {
         uint32_t pressed = pad.buttons & ~old_pad.buttons;
 
         if (s_state == INSTALLER_STATE_READY) {
-            psvDebugScreenClear(0x000000);
-            psvDebugScreenPrintf("***************************************************\n");
-            psvDebugScreenPrintf("  French Fries\n");
-            psvDebugScreenPrintf("  Installer for Safe-iTLS\n");
-            psvDebugScreenPrintf("***************************************************\n\n");
-            psvDebugScreenPrintf(" Storage Target:  %s (%s)\n",
-                                 s_storage.itls_dir,
-                                 s_storage.is_sd2vita ? "SD2Vita uma0:" : "Official Card ux0:");
-            psvDebugScreenPrintf(" Decryption:      Hardware Engine (Keyslot 0x20)\n");
-            psvDebugScreenPrintf(" Software Keys:   NONE (0%% key exposure)\n");
-            psvDebugScreenPrintf(" vs0: Safety:     100%% Untouched (Zero vs0: writes)\n\n");
-            psvDebugScreenPrintf(" Exact 5 Target Files to Extract:\n");
-            psvDebugScreenPrintf("   1. vs0:sys/external/libssl.suprx\n");
-            psvDebugScreenPrintf("   2. vs0:sys/external/libhttp.suprx\n");
-            psvDebugScreenPrintf("   3. vs0:/data/external/webcore/ScePsp2Compat.suprx\n");
-            psvDebugScreenPrintf("   4. vs0:sys/external/np_commerce2.suprx\n");
-            psvDebugScreenPrintf("   5. vs0:data/external/cert/CA_LIST.cer\n\n");
-            psvDebugScreenPrintf(" Controls:\n");
-            psvDebugScreenPrintf("   [X]     - Download from Sony & Extract Using Hardware\n");
-            psvDebugScreenPrintf("   [START] - Exit to LiveArea\n\n");
-            psvDebugScreenPrintf(" Status: %s\n", s_status_line);
-
             if (pressed & SCE_CTRL_CROSS) {
                 run_installer();
             } else if (pressed & SCE_CTRL_START) {
@@ -189,6 +200,7 @@ int main(int argc, char *argv[]) {
 
     downloader_term();
     hw_crypto_term();
+    psvDebugScreenTerm();
     sceKernelExitProcess(0);
     return 0;
 }

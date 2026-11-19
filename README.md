@@ -25,7 +25,26 @@ Both the Companion Extractor and the Kernel Plugin strictly target ONLY these 5 
 The companion installer fetches Sony's official update package:
 `http://deu01.psv.update.playstation.net/update/psv/image/2022_0209/rel_f2c7b12fe85496ec88a0391b514d6e3b/PSVUPDAT.PUP`
 
-It decrypts the container using the PlayStation Vita's on-chip **Bigmac DMA Hardware Cryptographic Co-processor** via `SceSblAuthMgr` (Keyslot `0x20`). No plaintext software AES keys are ever stored or exposed in software memory.
+It decrypts the container using the PlayStation Vita's on-chip **Bigmac DMAC5 Hardware Cryptographic Co-processor** via `SceSblDmac5Mgr` (`sceSblDmac5EncDecKeyGen`, AuthMgr Key ID `0x20`). No plaintext software AES keys are ever stored or exposed in software memory.
+
+---
+
+## Building from Source (VitaSDK)
+
+Ensure `$VITASDK` is installed and `$VITASDK/bin` is in your `PATH`:
+
+### Using Make
+```bash
+make               # Builds both plugin/itls.skprx and companion-app/Safe-iTLS-Companion.vpk
+make -C plugin     # Builds plugin/itls.skprx only
+make -C companion-app  # Builds companion-app/Safe-iTLS-Companion.vpk only
+```
+
+### Using CMake
+```bash
+cmake -S plugin -B build/plugin && cmake --build build/plugin
+cmake -S companion-app -B build/companion-app && cmake --build build/companion-app
+```
 
 ---
 

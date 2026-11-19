@@ -6,58 +6,50 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* Sony PS Vita Bigmac Hardware Engine Keyslots */
-#define BIGMAC_KEYSLOT_PUP_ENC      0x20    /* Firmware package payload AES key */
-#define BIGMAC_KEYSLOT_PUP_META     0x21    /* Firmware segment header / TOC key */
-#define BIGMAC_KEYSLOT_PFS_APP      0x28    /* PFS encrypted package key */
-#define BIGMAC_KEYSLOT_USER_CUSTOM  0x30    /* Custom software key load slot */
-
-#define AES_BLOCK_SIZE 16
-
-typedef enum {
-    HW_CRYPTO_MODE_CBC = 0,
-    HW_CRYPTO_MODE_CTR = 1,
-    HW_CRYPTO_MODE_ECB = 2
-} HwCryptoCipherMode;
+/*
+ * Sony PS Vita Bigmac DMAC5 Hardware Crypto Co-Processor Keyslots
+ * Decryption executes strictly in hardware silicon via SceSblDmac5Mgr.
+ * ZERO SOFTWARE AES KEYS ARE USED, LOADED, OR HELD IN RAM.
+ */
+#define BIGMAC_KEYSLOT_PUP_ENC  0x20U  /* Console PUP Package Hardware AuthMgr Key ID */
+#define AES_BLOCK_SIZE          16U
 
 typedef struct {
     bool hardware_engine_ready;
-    bool bigmac_dma_available;
-    bool sbl_authmgr_linked;
-    uint32_t active_keyslot;
-    uint64_t bytes_processed;
-    double throughput_mb_s;
+    uint32_t keyslot_used;
+    uint64_t bytes_decrypted;
+    uint32_t blocks_processed;
 } HwCryptoStats;
 
 /**
- * @brief Initialize connection to PS Vita hardware crypto subsystem (Bigmac/SceSblAuthMgr).
- * @return 0 on success, negative error code on failure.
+ * @brief Initializes the PS Vita on-chip Bigmac DMAC5 hardware crypto engine.
+ * @return 0 on success, negative Vita error code on failure.
  */
 int hw_crypto_init(void);
 
 /**
- * @brief Decrypt data block utilizing the PS Vita's on-chip hardware cryptographic DMA engine.
- * The operation executes inside the Vita's hardware security enclave, avoiding software key exposure.
+ * @brief Decrypts data purely using the PS Vita's on-chip DMAC5/Bigmac hardware co-processor.
  *
- * @param src Pointer to encrypted source ciphertext (16-byte aligned).
- * @param dst Pointer to destination plaintext buffer (16-byte aligned).
- * @param size Data size in bytes (must be a multiple of 16).
- * @param keyslot Sony hardware keyslot ID (e.g., BIGMAC_KEYSLOT_PUP_ENC).
- * @param iv 16-byte Initialization Vector.
- * @param mode Cipher mode (HW_CRYPTO_MODE_CBC or HW_CRYPTO_MODE_CTR).
+ * Hardware Mechanism:
+ * - Invokes sceSblDmac5EncDecKeyGen from <psp2/dmac5.h> (SceSblSsMgr_stub).
+ * - Hardware AuthMgr key identifier 0x20 derives key material inside the SCE security enclave.
+ * - NO software AES key buffers, key expansions, or S-boxes are ever present in RAM.
+ *
+ * @param src Pointer to ciphertext buffer.
+ * @param dst Pointer to plaintext output buffer.
+ * @param size Byte length of data (multiple of 16).
+ * @param iv 16-byte Initialization Vector (updated in place with next CBC chaining block).
  * @return 0 on success, negative Vita error code on failure.
  */
-int hw_crypto_decrypt(const uint8_t *src, uint8_t *dst, size_t size,
-                      uint32_t keyslot, const uint8_t *iv,
-                      HwCryptoCipherMode mode);
+int hw_crypto_hardware_decrypt_pup(const uint8_t *src, uint8_t *dst, size_t size, uint8_t *iv);
 
 /**
- * @brief Fetch current operational status and hardware acceleration statistics.
+ * @brief Query hardware crypto co-processor statistics.
  */
 void hw_crypto_get_stats(HwCryptoStats *stats);
 
 /**
- * @brief Teardown hardware crypto engine context.
+ * @brief Teardown hardware crypto subsystem.
  */
 void hw_crypto_term(void);
 

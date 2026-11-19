@@ -1,37 +1,65 @@
 #include "downloader.h"
+#include <psp2/sysmodule.h>
 #include <psp2/net/net.h>
 #include <psp2/net/netctl.h>
 #include <psp2/net/http.h>
 #include <psp2/io/fcntl.h>
-#include <psp2/kernel/sysmem.h>
 #include <psp2/rtc.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define NET_INIT_SIZE (1 * 1024 * 1024)
+#define NET_INIT_SIZE  (1 * 1024 * 1024)
 #define HTTP_POOL_SIZE (512 * 1024)
 
 static bool s_net_initialized = false;
+static bool s_sysmod_net_loaded = false;
+static bool s_sysmod_http_loaded = false;
 static void *s_net_memory = NULL;
 static int s_http_template = -1;
 static volatile bool s_cancel_requested = false;
 
 int downloader_init(void) {
-    if (s_net_initialized) return 0;
+    if (s_net_initialized) {
+        return 0;
+    }
+
+    int res = sceSysmoduleLoadModule(SCE_SYSMODULE_NET);
+    if (res < 0) {
+        return res;
+    }
+    s_sysmod_net_loaded = true;
+
+    res = sceSysmoduleLoadModule(SCE_SYSMODULE_HTTP);
+    if (res < 0) {
+        sceSysmoduleUnloadModule(SCE_SYSMODULE_NET);
+        s_sysmod_net_loaded = false;
+        return res;
+    }
+    s_sysmod_http_loaded = true;
 
     s_net_memory = malloc(NET_INIT_SIZE);
-    if (!s_net_memory) return -1;
+    if (!s_net_memory) {
+        sceSysmoduleUnloadModule(SCE_SYSMODULE_HTTP);
+        sceSysmoduleUnloadModule(SCE_SYSMODULE_NET);
+        s_sysmod_http_loaded = false;
+        s_sysmod_net_loaded = false;
+        return -1;
+    }
 
     SceNetInitParam net_param;
     net_param.memory = s_net_memory;
     net_param.size = NET_INIT_SIZE;
     net_param.flags = 0;
 
-    int res = sceNetInit(&net_param);
+    res = sceNetInit(&net_param);
     if (res < 0) {
         free(s_net_memory);
         s_net_memory = NULL;
+        sceSysmoduleUnloadModule(SCE_SYSMODULE_HTTP);
+        sceSysmoduleUnloadModule(SCE_SYSMODULE_NET);
+        s_sysmod_http_loaded = false;
+        s_sysmod_net_loaded = false;
         return res;
     }
 
@@ -40,6 +68,10 @@ int downloader_init(void) {
         sceNetTerm();
         free(s_net_memory);
         s_net_memory = NULL;
+        sceSysmoduleUnloadModule(SCE_SYSMODULE_HTTP);
+        sceSysmoduleUnloadModule(SCE_SYSMODULE_NET);
+        s_sysmod_http_loaded = false;
+        s_sysmod_net_loaded = false;
         return res;
     }
 
@@ -49,16 +81,26 @@ int downloader_init(void) {
         sceNetTerm();
         free(s_net_memory);
         s_net_memory = NULL;
+        sceSysmoduleUnloadModule(SCE_SYSMODULE_HTTP);
+        sceSysmoduleUnloadModule(SCE_SYSMODULE_NET);
+        s_sysmod_http_loaded = false;
+        s_sysmod_net_loaded = false;
         return res;
     }
 
-    s_http_template = sceHttpCreateTemplate("Safe-iTLS-Companion/1.0.0", 2, 1);
+    s_http_template = sceHttpCreateTemplate("Safe-iTLS-Companion/1.1.1",
+                                            SCE_HTTP_VERSION_1_1,
+                                            SCE_TRUE);
     if (s_http_template < 0) {
         sceHttpTerm();
         sceNetCtlTerm();
         sceNetTerm();
         free(s_net_memory);
         s_net_memory = NULL;
+        sceSysmoduleUnloadModule(SCE_SYSMODULE_HTTP);
+        sceSysmoduleUnloadModule(SCE_SYSMODULE_NET);
+        s_sysmod_http_loaded = false;
+        s_sysmod_net_loaded = false;
         return s_http_template;
     }
 
@@ -87,7 +129,7 @@ int downloader_fetch_pup(const char *url, const char *destination_path,
             progress.status = DOWNLOAD_STATUS_ERROR;
             progress.error_code = init_res;
             snprintf(progress.error_message, sizeof(progress.error_message),
-                     "Failed to initialize Vita network stack (0x%08X)", init_res);
+                     "Failed to initialize Vita network stack (0x%08X)", (unsigned int)init_res);
             if (callback) callback(&progress, userdata);
             return init_res;
         }
@@ -98,7 +140,7 @@ int downloader_fetch_pup(const char *url, const char *destination_path,
         progress.status = DOWNLOAD_STATUS_ERROR;
         progress.error_code = conn_id;
         snprintf(progress.error_message, sizeof(progress.error_message),
-                 "Failed to create HTTP connection to CDN (0x%08X)", conn_id);
+                 "Failed to create HTTP connection to CDN (0x%08X)", (unsigned int)conn_id);
         if (callback) callback(&progress, userdata);
         return conn_id;
     }
@@ -109,7 +151,7 @@ int downloader_fetch_pup(const char *url, const char *destination_path,
         progress.status = DOWNLOAD_STATUS_ERROR;
         progress.error_code = req_id;
         snprintf(progress.error_message, sizeof(progress.error_message),
-                 "Failed to create HTTP request (0x%08X)", req_id);
+                 "Failed to create HTTP request (0x%08X)", (unsigned int)req_id);
         if (callback) callback(&progress, userdata);
         return req_id;
     }
@@ -121,17 +163,17 @@ int downloader_fetch_pup(const char *url, const char *destination_path,
         progress.status = DOWNLOAD_STATUS_ERROR;
         progress.error_code = send_res;
         snprintf(progress.error_message, sizeof(progress.error_message),
-                 "Failed to send HTTP request (0x%08X)", send_res);
+                 "Failed to send HTTP request (0x%08X)", (unsigned int)send_res);
         if (callback) callback(&progress, userdata);
         return send_res;
     }
 
-    uint64_t content_length = 0;
-    int len_res = sceHttpGetContentLength(req_id, &content_length);
-    if (len_res >= 0) {
-        progress.total_bytes = content_length;
+    unsigned long long int content_length = 0;
+    int len_res = sceHttpGetResponseContentLength(req_id, &content_length);
+    if (len_res >= 0 && content_length > 0) {
+        progress.total_bytes = (uint64_t)content_length;
     } else {
-        /* Approximate standard 3.65/3.68 update PUP size if chunked */
+        /* Approximate standard official update PUP size if chunked */
         progress.total_bytes = 133880832ULL;
     }
 
@@ -143,7 +185,7 @@ int downloader_fetch_pup(const char *url, const char *destination_path,
         progress.status = DOWNLOAD_STATUS_ERROR;
         progress.error_code = fd;
         snprintf(progress.error_message, sizeof(progress.error_message),
-                 "Failed to create destination file: %s (0x%08X)", destination_path, fd);
+                 "Failed to create destination file: %s (0x%08X)", destination_path, (unsigned int)fd);
         if (callback) callback(&progress, userdata);
         return fd;
     }
@@ -171,7 +213,7 @@ int downloader_fetch_pup(const char *url, const char *destination_path,
             progress.status = DOWNLOAD_STATUS_ERROR;
             progress.error_code = read_bytes;
             snprintf(progress.error_message, sizeof(progress.error_message),
-                     "HTTP data stream read error (0x%08X)", read_bytes);
+                     "HTTP data stream read error (0x%08X)", (unsigned int)read_bytes);
             break;
         }
         if (read_bytes == 0) {
@@ -181,7 +223,7 @@ int downloader_fetch_pup(const char *url, const char *destination_path,
             break;
         }
 
-        int written = sceIoWrite(fd, chunk_buffer, read_bytes);
+        int written = sceIoWrite(fd, chunk_buffer, (SceSize)read_bytes);
         if (written != read_bytes) {
             progress.status = DOWNLOAD_STATUS_ERROR;
             progress.error_code = -1;
@@ -190,22 +232,25 @@ int downloader_fetch_pup(const char *url, const char *destination_path,
             break;
         }
 
-        progress.downloaded_bytes += read_bytes;
-        bytes_since_last_calc += read_bytes;
+        progress.downloaded_bytes += (uint64_t)read_bytes;
+        bytes_since_last_calc += (uint64_t)read_bytes;
 
         sceRtcGetCurrentTick(&now_tick);
         uint64_t interval_micro = now_tick.tick - last_calc_tick.tick;
 
-        if (interval_micro >= 500000) { /* Update stats every 500ms */
+        if (interval_micro >= 500000ULL) { /* Update stats every 500ms */
             double seconds = (double)interval_micro / 1000000.0;
             progress.speed_kb_s = ((double)bytes_since_last_calc / 1024.0) / seconds;
             bytes_since_last_calc = 0;
             last_calc_tick = now_tick;
 
             if (progress.total_bytes > 0) {
-                progress.progress_percent = ((double)progress.downloaded_bytes / (double)progress.total_bytes) * 100.0;
-                if (progress.speed_kb_s > 0) {
-                    uint64_t remaining_bytes = progress.total_bytes - progress.downloaded_bytes;
+                double pct = ((double)progress.downloaded_bytes / (double)progress.total_bytes) * 100.0;
+                progress.progress_percent = (pct > 100.0) ? 100.0 : pct;
+                if (progress.speed_kb_s > 0.0) {
+                    uint64_t remaining_bytes = (progress.total_bytes > progress.downloaded_bytes)
+                        ? (progress.total_bytes - progress.downloaded_bytes)
+                        : 0;
                     progress.eta_seconds = (uint32_t)((double)remaining_bytes / (progress.speed_kb_s * 1024.0));
                 }
             }
@@ -230,7 +275,9 @@ int downloader_fetch_pup(const char *url, const char *destination_path,
 }
 
 void downloader_term(void) {
-    if (!s_net_initialized) return;
+    if (!s_net_initialized) {
+        return;
+    }
 
     if (s_http_template >= 0) {
         sceHttpDeleteTemplate(s_http_template);
@@ -244,6 +291,16 @@ void downloader_term(void) {
     if (s_net_memory) {
         free(s_net_memory);
         s_net_memory = NULL;
+    }
+
+    if (s_sysmod_http_loaded) {
+        sceSysmoduleUnloadModule(SCE_SYSMODULE_HTTP);
+        s_sysmod_http_loaded = false;
+    }
+
+    if (s_sysmod_net_loaded) {
+        sceSysmoduleUnloadModule(SCE_SYSMODULE_NET);
+        s_sysmod_net_loaded = false;
     }
 
     s_net_initialized = false;

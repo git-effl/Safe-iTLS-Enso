@@ -25,7 +25,7 @@
 
 typedef struct {
     const char *orig_pattern_1; /* e.g. "vs0:sys/external/libssl.suprx" */
-    const char *orig_pattern_2; /* with or without leading slash e.g. "vs0:/sys/external/libssl.suprx" */
+    const char *orig_pattern_2; /* with leading slash e.g. "vs0:/sys/external/libssl.suprx" */
     const char *card_filename;  /* e.g. "libssl.suprx" */
     bool available;
     uint32_t redirect_count;
@@ -53,6 +53,7 @@ int redirect_init(void);
 
 /**
  * @brief Checks if given path targets one of the EXACT 5 allowed files.
+ * Lazily re-probes storage if card mounted after early kernel boot.
  * If verified on card, rewrites to card path. Otherwise returns false.
  */
 bool redirect_resolve_path(const char *orig_path, char *output_path, size_t max_len);
@@ -63,7 +64,7 @@ bool redirect_resolve_path(const char *orig_path, char *output_path, size_t max_
 void redirect_get_status(RedirectStatus *status);
 
 /**
- * @brief Re-probe storage card.
+ * @brief Re-probe storage card (re-entrancy safe).
  */
 void redirect_refresh_storage(void);
 

@@ -1,6 +1,8 @@
 #include "redirect.h"
-#include <psp2kern/kernel/clib.h>
+#include <psp2kern/kernel/sysclib.h>
 #include <psp2kern/io/stat.h>
+
+static volatile int s_in_probe = 0;
 
 static RedirectStatus s_status = {
     .active_target = REDIRECT_TARGET_NONE,
@@ -47,8 +49,12 @@ static RedirectStatus s_status = {
 };
 
 static bool file_exists_kernel(const char *path) {
-    if (!path || path[0] == '\0') return false;
+    if (!path || path[0] == '\0') {
+        return false;
+    }
+
     SceIoStat stat;
+    memset(&stat, 0, sizeof(stat));
     int res = ksceIoGetstat(path, &stat);
     return (res >= 0 && stat.st_size > 0);
 }
@@ -58,7 +64,7 @@ static bool probe_directory(const char *dir, RedirectTarget target) {
     char test_path[MAX_PATH_LEN];
 
     for (int i = 0; i < TARGET_FILE_COUNT; i++) {
-        ksceClibSnprintf(test_path, sizeof(test_path), "%s/%s", dir, s_status.items[i].card_filename);
+        snprintf(test_path, sizeof(test_path), "%s/%s", dir, s_status.items[i].card_filename);
         bool exists = file_exists_kernel(test_path);
         s_status.items[i].available = exists;
         if (exists) {
@@ -68,7 +74,7 @@ static bool probe_directory(const char *dir, RedirectTarget target) {
 
     if (available_count > 0) {
         s_status.active_target = target;
-        ksceClibStrncpy(s_status.base_dir, dir, sizeof(s_status.base_dir) - 1);
+        snprintf(s_status.base_dir, sizeof(s_status.base_dir), "%s", dir);
         return true;
     }
 
@@ -76,6 +82,11 @@ static bool probe_directory(const char *dir, RedirectTarget target) {
 }
 
 void redirect_refresh_storage(void) {
+    if (s_in_probe) {
+        return;
+    }
+
+    s_in_probe = 1;
     s_status.active_target = REDIRECT_TARGET_NONE;
     s_status.base_dir[0] = '\0';
 
@@ -85,11 +96,13 @@ void redirect_refresh_storage(void) {
 
     /* 1. Priority: Probe SD2Vita (uma0:data/itls) */
     if (probe_directory(SD2VITA_ITLS_DIR, REDIRECT_TARGET_SD2VITA)) {
+        s_in_probe = 0;
         return;
     }
 
     /* 2. Fallback: Probe Official Memory Card (ux0:data/itls) */
     probe_directory(MEMCARD_ITLS_DIR, REDIRECT_TARGET_MEMCARD);
+    s_in_probe = 0;
 }
 
 int redirect_init(void) {
@@ -98,11 +111,7 @@ int redirect_init(void) {
 }
 
 bool redirect_resolve_path(const char *orig_path, char *output_path, size_t max_len) {
-    if (!orig_path || !output_path || max_len == 0) return false;
-
-    /* If no storage card directory has extracted modules, pass through to vs0: */
-    if (s_status.active_target == REDIRECT_TARGET_NONE) {
-        s_status.fallback_count++;
+    if (s_in_probe || !orig_path || !output_path || max_len == 0) {
         return false;
     }
 
@@ -117,30 +126,45 @@ bool redirect_resolve_path(const char *orig_path, char *output_path, size_t max_
      *
      * DO NOT REDIRECT ANY OTHER SYSTEM FILES.
      */
+    int matched_idx = -1;
     for (int i = 0; i < TARGET_FILE_COUNT; i++) {
-        if (ksceClibStrstr(orig_path, s_status.items[i].orig_pattern_1) != NULL ||
-            ksceClibStrstr(orig_path, s_status.items[i].orig_pattern_2) != NULL) {
-
-            /* File matched one of the 5 targets! Verify presence on storage card */
-            if (s_status.items[i].available) {
-                ksceClibSnprintf(output_path, max_len, "%s/%s",
-                                 s_status.base_dir, s_status.items[i].card_filename);
-                s_status.items[i].redirect_count++;
-                s_status.total_redirects++;
-                return true;
-            } else {
-                /* Target file missing on card; safe fallback to original vs0: */
-                s_status.fallback_count++;
-                return false;
-            }
+        if (strcmp(orig_path, s_status.items[i].orig_pattern_1) == 0 ||
+            strcmp(orig_path, s_status.items[i].orig_pattern_2) == 0) {
+            matched_idx = i;
+            break;
         }
     }
 
     /* Any other path: strictly NOT redirected */
+    if (matched_idx < 0) {
+        return false;
+    }
+
+    /*
+     * At *KERNEL boot time, uma0:/ux0: may not be mounted when module_start runs.
+     * Lazily probe storage on the first matching target request.
+     */
+    if (s_status.active_target == REDIRECT_TARGET_NONE) {
+        redirect_refresh_storage();
+    }
+
+    if (s_status.active_target != REDIRECT_TARGET_NONE &&
+        s_status.items[matched_idx].available) {
+        snprintf(output_path, max_len, "%s/%s",
+                 s_status.base_dir, s_status.items[matched_idx].card_filename);
+        s_status.items[matched_idx].redirect_count++;
+        s_status.total_redirects++;
+        return true;
+    }
+
+    /* Target file missing or card ejected; safe fallback to original vs0: */
+    s_status.fallback_count++;
     return false;
 }
 
 void redirect_get_status(RedirectStatus *status) {
-    if (!status) return;
-    ksceClibMemcpy(status, &s_status, sizeof(RedirectStatus));
+    if (!status) {
+        return;
+    }
+    memcpy(status, &s_status, sizeof(RedirectStatus));
 }

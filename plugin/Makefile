@@ -7,27 +7,25 @@ TARGET   = itls
 OBJS     = src/main.o src/redirect.o
 
 LIBS     = -ltaihenForKernel_stub \
-           -lSceModulemgrForKernel_stub \
-           -lSceIofilemgrForKernel_stub \
-           -lSceSysmemForKernel_stub \
-           -lSceClibForKernel_stub
+           -lSceIofilemgrForDriver_stub \
+           -lSceSysclibForDriver_stub \
+           -lSceDebugForDriver_stub
 
 PREFIX   = arm-vita-eabi
 CC       = $(PREFIX)-gcc
-CFLAGS   = -Wl,-q -Wall -O3 -Isrc -nostdlib
-ASFLAGS  = $(CFLAGS)
+CFLAGS   = -Wall -O3 -Isrc -std=gnu99
+LDFLAGS  = -Wl,-q -nostdlib
 
 all: $(TARGET).skprx
 
 $(TARGET).skprx: $(TARGET).velf
-	vita-make-fself -k -c $< $@
+	vita-make-fself -c $< $@
 
 $(TARGET).velf: $(TARGET).elf
-	$(PREFIX)-strip -g $<
 	vita-elf-create -e exports.yml $< $@
 
 $(TARGET).elf: $(OBJS)
-	$(CC) $(CFLAGS) $^ $(LIBS) -o $@
+	$(CC) $(LDFLAGS) $^ $(LIBS) -o $@
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@

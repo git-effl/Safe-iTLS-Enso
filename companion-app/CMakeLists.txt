@@ -1,7 +1,4 @@
 cmake_minimum_required(VERSION 3.10)
-project(Safe-iTLS-Companion C)
-
-set(CMAKE_C_STANDARD 11)
 
 if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
   if(DEFINED ENV{VITASDK})
@@ -11,13 +8,18 @@ if(NOT DEFINED CMAKE_TOOLCHAIN_FILE)
   endif()
 endif()
 
+project(Safe-iTLS-Companion C)
 include("${VITASDK}/share/vita.cmake" REQUIRED)
+
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wl,-q -Wall -O3")
 
 set(TITLE_ID "ITLS00001")
 set(APP_TITLE "Safe-iTLS Companion")
 
 set(SOURCES
     src/main.c
+    src/debug_screen.c
     src/storage.c
     src/downloader.c
     src/hw_crypto.c
@@ -28,19 +30,18 @@ add_executable(${PROJECT_NAME} ${SOURCES})
 target_include_directories(${PROJECT_NAME} PRIVATE src)
 
 target_link_libraries(${PROJECT_NAME}
+    SceDisplay_stub
     SceNet_stub
     SceNetCtl_stub
     SceHttp_stub
-    SceSsl_stub
     SceCtrl_stub
     ScePower_stub
     SceRtc_stub
     SceSysmodule_stub
-    debugscreen
+    SceSblSsMgr_stub
 )
 
 vita_create_self(eboot.bin ${PROJECT_NAME} UNSAFE)
-vita_create_sfo(param.sfo ${TITLE_ID} ${APP_TITLE})
 
 vita_create_vpk(${PROJECT_NAME}.vpk ${TITLE_ID} eboot.bin
     VERSION "01.00"

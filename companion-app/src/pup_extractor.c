@@ -2,7 +2,6 @@
 #include "hw_crypto.h"
 #include "storage.h"
 #include <psp2/io/fcntl.h>
-#include <psp2/kernel/sysmem.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -57,8 +56,10 @@ static int find_target_index_by_id(uint32_t file_id) {
 }
 
 int pup_extract_target_modules(const char *pup_path, const char *output_dir,
-                              PupExtractCallback callback, void *userdata) {
-    if (!pup_path || !output_dir) return -1;
+                               PupExtractCallback callback, void *userdata) {
+    if (!pup_path || !output_dir) {
+        return -1;
+    }
 
     PupExtractProgress progress;
     memset(&progress, 0, sizeof(progress));
@@ -81,14 +82,14 @@ int pup_extract_target_modules(const char *pup_path, const char *output_dir,
         progress.status = PUP_EXTRACT_ERROR;
         progress.error_code = fd;
         snprintf(progress.error_message, sizeof(progress.error_message),
-                 "Failed to open PUP file: %s (0x%08X)", pup_path, fd);
+                 "Failed to open PUP file: %s (0x%08X)", pup_path, (unsigned int)fd);
         if (callback) callback(&progress, userdata);
         return fd;
     }
 
     PupHeader header;
     int read_bytes = sceIoRead(fd, &header, sizeof(PupHeader));
-    if (read_bytes != sizeof(PupHeader)) {
+    if (read_bytes != (int)sizeof(PupHeader)) {
         sceIoClose(fd);
         progress.status = PUP_EXTRACT_ERROR;
         progress.error_code = -1;
@@ -108,7 +109,7 @@ int pup_extract_target_modules(const char *pup_path, const char *output_dir,
         return -2;
     }
 
-    /* Initialize PS Vita Bigmac Hardware Crypto Engine */
+    /* Initialize PS Vita Bigmac DMAC5 Hardware Crypto Engine */
     hw_crypto_init();
 
     uint32_t file_count = header.file_count;
@@ -117,7 +118,7 @@ int pup_extract_target_modules(const char *pup_path, const char *output_dir,
     }
 
     PupEntry entries[PUP_MAX_ENTRIES];
-    read_bytes = sceIoRead(fd, entries, file_count * sizeof(PupEntry));
+    read_bytes = sceIoRead(fd, entries, (SceSize)(file_count * sizeof(PupEntry)));
     if (read_bytes != (int)(file_count * sizeof(PupEntry))) {
         sceIoClose(fd);
         progress.status = PUP_EXTRACT_ERROR;
@@ -130,8 +131,8 @@ int pup_extract_target_modules(const char *pup_path, const char *output_dir,
     uint8_t *io_buffer = (uint8_t *)malloc(EXTRACT_CHUNK_SIZE);
     uint8_t *dec_buffer = (uint8_t *)malloc(EXTRACT_CHUNK_SIZE);
     if (!io_buffer || !dec_buffer) {
-        if (io_buffer) free(io_buffer);
-        if (dec_buffer) free(dec_buffer);
+        free(io_buffer);
+        free(dec_buffer);
         sceIoClose(fd);
         return -1;
     }
@@ -139,23 +140,18 @@ int pup_extract_target_modules(const char *pup_path, const char *output_dir,
     uint32_t extracted_count = 0;
 
     /*
-     * Iterate over PUP entries and match ONLY against our 5 targets:
+     * Iterate over PUP entries and extract ONLY the exact 5 target files:
      * 1. vs0:sys/external/libssl.suprx
      * 2. vs0:sys/external/libhttp.suprx
      * 3. vs0:/data/external/webcore/ScePsp2Compat.suprx
      * 4. vs0:sys/external/np_commerce2.suprx
      * 5. vs0:data/external/cert/CA_LIST.cer
      *
-     * ALL OTHER FILES IN THE UPDATE ARE STRICTLY SKIPPED.
+     * ALL OTHER FILES IN THE UPDATE PACKAGE ARE STRICTLY SKIPPED.
      */
     for (uint32_t i = 0; i < file_count && extracted_count < TARGET_FILE_COUNT; i++) {
-        /*
-         * If the PUP has mapped file IDs directly, or if segments correspond to targets:
-         * We map entry index or file_id to our target list.
-         */
         int target_idx = find_target_index_by_id(entries[i].file_id);
         if (target_idx < 0) {
-            /* Map segment entries 0..4 to targets if file_id mapping is sequential */
             if (i < TARGET_FILE_COUNT) {
                 target_idx = (int)i;
             } else {
@@ -163,7 +159,7 @@ int pup_extract_target_modules(const char *pup_path, const char *output_dir,
             }
         }
 
-        progress.current_target_index = target_idx + 1;
+        progress.current_target_index = (uint32_t)(target_idx + 1);
         snprintf(progress.current_target_name, sizeof(progress.current_target_name),
                  "%s", s_targets[target_idx].dest_filename);
         progress.status = PUP_EXTRACT_HARDWARE_DECRYPT;
@@ -177,41 +173,37 @@ int pup_extract_target_modules(const char *pup_path, const char *output_dir,
             continue;
         }
 
-        sceIoLseek(fd, entries[i].file_offset, SCE_SEEK_SET);
+        sceIoLseek(fd, (SceOff)entries[i].file_offset, SCE_SEEK_SET);
         uint64_t remaining = entries[i].file_length;
-        bool is_encrypted = (entries[i].flags & 1) != 0 || true; /* Firmware modules are encrypted */
 
-        uint8_t iv[AES_BLOCK_SIZE] = {0};
+        uint8_t iv[AES_BLOCK_SIZE];
+        memset(iv, 0, sizeof(iv));
 
         while (remaining > 0) {
             size_t to_read = (remaining > EXTRACT_CHUNK_SIZE) ? EXTRACT_CHUNK_SIZE : (size_t)remaining;
-            int r = sceIoRead(fd, io_buffer, to_read);
-            if (r <= 0) break;
-
-            if (is_encrypted) {
-                /*
-                 * DECRYPTION USING PS VITA BIGMAC HARDWARE ONLY.
-                 * ZERO software AES keys are passed.
-                 * Pass Sony Hardware Keyslot 0x20 directly to the hardware engine.
-                 */
-                size_t aligned_len = (r / AES_BLOCK_SIZE) * AES_BLOCK_SIZE;
-                if (aligned_len > 0) {
-                    hw_crypto_decrypt(io_buffer, dec_buffer, aligned_len,
-                                      BIGMAC_KEYSLOT_PUP_ENC, iv, HW_CRYPTO_MODE_CBC);
-                    if ((size_t)r > aligned_len) {
-                        memcpy(dec_buffer + aligned_len, io_buffer + aligned_len, r - aligned_len);
-                    }
-                    sceIoWrite(out_fd, dec_buffer, r);
-                } else {
-                    sceIoWrite(out_fd, io_buffer, r);
-                }
-            } else {
-                sceIoWrite(out_fd, io_buffer, r);
+            int r = sceIoRead(fd, io_buffer, (SceSize)to_read);
+            if (r <= 0) {
+                break;
             }
 
-            remaining -= r;
-            progress.bytes_processed += r;
-            s_targets[target_idx].bytes_written += r;
+            /*
+             * DECRYPTION USING PS VITA BIGMAC DMAC5 HARDWARE ONLY.
+             * ZERO software AES keys are passed (hardware AuthMgr key_id 0x20).
+             */
+            size_t aligned_len = ((size_t)r / AES_BLOCK_SIZE) * AES_BLOCK_SIZE;
+            if (aligned_len > 0) {
+                hw_crypto_hardware_decrypt_pup(io_buffer, dec_buffer, aligned_len, iv);
+                if ((size_t)r > aligned_len) {
+                    memcpy(dec_buffer + aligned_len, io_buffer + aligned_len, (size_t)r - aligned_len);
+                }
+                sceIoWrite(out_fd, dec_buffer, (SceSize)r);
+            } else {
+                sceIoWrite(out_fd, io_buffer, (SceSize)r);
+            }
+
+            remaining -= (uint64_t)r;
+            progress.bytes_processed += (uint64_t)r;
+            s_targets[target_idx].bytes_written += (uint64_t)r;
         }
 
         sceIoClose(out_fd);
