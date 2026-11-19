@@ -55,13 +55,6 @@ static int find_target_index_by_id(uint32_t file_id) {
     return -1;
 }
 
-const char *pup_get_target_filename(int index) {
-    if (index < 0 || index >= TARGET_FILE_COUNT) {
-        return NULL;
-    }
-    return s_targets[index].dest_filename;
-}
-
 int pup_extract_target_modules(const char *pup_path, const char *output_dir,
                                PupExtractCallback callback, void *userdata) {
     if (!pup_path || !output_dir) {

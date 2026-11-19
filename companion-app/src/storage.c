@@ -1,12 +1,8 @@
 #include "storage.h"
 #include <psp2/io/dirent.h>
-#include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-
-#define COPY_CHUNK_SIZE (64 * 1024)
 
 bool storage_path_exists(const char *path) {
     if (!path || path[0] == '\0') {
@@ -118,52 +114,6 @@ int storage_detect_target(StorageTarget *target) {
     target->medium = STORAGE_UNKNOWN;
     snprintf(target->itls_dir, sizeof(target->itls_dir), UX0_ITLS_DIR);
     return -1;
-}
-
-int storage_copy_file(const char *src_path, const char *dst_path) {
-    if (!src_path || !dst_path) {
-        return -1;
-    }
-
-    SceUID in_fd = sceIoOpen(src_path, SCE_O_RDONLY, 0);
-    if (in_fd < 0) {
-        return in_fd;
-    }
-
-    SceUID out_fd = sceIoOpen(dst_path, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
-    if (out_fd < 0) {
-        sceIoClose(in_fd);
-        return out_fd;
-    }
-
-    uint8_t *buf = (uint8_t *)malloc(COPY_CHUNK_SIZE);
-    if (!buf) {
-        sceIoClose(out_fd);
-        sceIoClose(in_fd);
-        return -1;
-    }
-
-    int result = 0;
-    for (;;) {
-        int r = sceIoRead(in_fd, buf, COPY_CHUNK_SIZE);
-        if (r < 0) {
-            result = r;
-            break;
-        }
-        if (r == 0) {
-            break;
-        }
-        int w = sceIoWrite(out_fd, buf, (SceSize)r);
-        if (w != r) {
-            result = -1;
-            break;
-        }
-    }
-
-    free(buf);
-    sceIoClose(out_fd);
-    sceIoClose(in_fd);
-    return result;
 }
 
 void storage_format_size(uint64_t bytes, char *out_str, size_t out_max) {

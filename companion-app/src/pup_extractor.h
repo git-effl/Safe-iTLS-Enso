@@ -81,9 +81,4 @@ typedef void (*PupExtractCallback)(const PupExtractProgress *progress, void *use
 int pup_extract_target_modules(const char *pup_path, const char *output_dir,
                                PupExtractCallback callback, void *userdata);
 
-/**
- * @brief Returns the card filename (e.g. "libssl.suprx") for target index 0..TARGET_FILE_COUNT-1.
- */
-const char *pup_get_target_filename(int index);
-
 #endif /* PUP_EXTRACTOR_H */

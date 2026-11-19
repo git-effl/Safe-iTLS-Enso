@@ -51,7 +51,7 @@ cmake -S companion-app -B build/companion-app && cmake --build build/companion-a
 ## Quick Start & Installation
 
 1. **Install and run `Safe-iTLS-Companion.vpk`:**
-   Use **UP / DOWN** to select your target partition (**Both `uma0:` and `ux0:`**, `uma0:` only, or `ux0:` only), then press **(X)** to download the update from Sony's servers and hardware-extract the 5 modules.
+   Use **UP / DOWN** to choose which partition to use (`uma0:/data/itls` or `ux0:/data/itls`), then press **(X)** to download the update from Sony's servers and hardware-extract the 5 modules to that partition.
 2. **Install `itls.skprx`:**
    Copy `itls.skprx` to `ur0:tai/itls.skprx`.
 3. **Add to `ur0:tai/config.txt`:**
