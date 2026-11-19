@@ -63,8 +63,8 @@ static void on_extract_progress(const PupExtractProgress *progress, void *userda
 static void run_installer(void) {
     psvDebugScreenClear(0x000000);
     psvDebugScreenPrintf("===================================================\n");
-    psvDebugScreenPrintf(" Safe-iTLS-Enso Firmware Installer\n");
-    psvDebugScreenPrintf(" Zero vs0: Modifications • Hardware Bigmac Decrypt\n");
+    psvDebugScreenPrintf(" French Fries\n");
+    psvDebugScreenPrintf(" Installer for Safe-iTLS\n");
     psvDebugScreenPrintf("===================================================\n\n");
 
     /* Step 1: Storage Detection */
@@ -153,13 +153,13 @@ int main(int argc, char *argv[]) {
         if (s_state == INSTALLER_STATE_READY) {
             psvDebugScreenClear(0x000000);
             psvDebugScreenPrintf("***************************************************\n");
-            psvDebugScreenPrintf("  Safe-iTLS-Enso Firmware Installer (v1.1.0)\n");
-            psvDebugScreenPrintf("  Official Sony Server Download & Hardware Decrypt\n");
+            psvDebugScreenPrintf("  French Fries\n");
+            psvDebugScreenPrintf("  Installer for Safe-iTLS\n");
             psvDebugScreenPrintf("***************************************************\n\n");
             psvDebugScreenPrintf(" Storage Target:  %s (%s)\n",
                                  s_storage.itls_dir,
                                  s_storage.is_sd2vita ? "SD2Vita uma0:" : "Official Card ux0:");
-            psvDebugScreenPrintf(" Decryption:      Hardware Bigmac Engine (Keyslot 0x20)\n");
+            psvDebugScreenPrintf(" Decryption:      Hardware Engine (Keyslot 0x20)\n");
             psvDebugScreenPrintf(" Software Keys:   NONE (0%% key exposure)\n");
             psvDebugScreenPrintf(" vs0: Safety:     100%% Untouched (Zero vs0: writes)\n\n");
             psvDebugScreenPrintf(" Exact 5 Target Files to Extract:\n");
