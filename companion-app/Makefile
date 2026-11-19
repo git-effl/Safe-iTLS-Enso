@@ -27,7 +27,7 @@ LIBS     = -lSceDisplay_stub \
 PREFIX   = arm-vita-eabi
 CC       = $(PREFIX)-gcc
 CFLAGS   = -Wall -O3 -Isrc -std=gnu11
-LDFLAGS  = -Wl,-q
+LDFLAGS  = -Wl,-q -Wl,-z,max-page-size=0x10000 -Wl,-z,common-page-size=0x10000 -Wl,--defsym=__sce_headroom=0x10000
 
 all: $(TARGET).vpk
 
@@ -46,7 +46,7 @@ $(TARGET).elf: $(OBJS)
 	$(CC) $(LDFLAGS) $^ $(LIBS) -o $@
 
 param.sfo:
-	vita-mksfoex -s TITLE_ID=$(TITLE_ID) "Safe-iTLS Companion" param.sfo
+	vita-mksfoex -s TITLE_ID=$(TITLE_ID) -s CONTENT_ID=HB0001-$(TITLE_ID)_00-0000000000000000 "Safe-iTLS Companion" param.sfo
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@

@@ -14,7 +14,7 @@ LIBS     = -ltaihenForKernel_stub \
 PREFIX   = arm-vita-eabi
 CC       = $(PREFIX)-gcc
 CFLAGS   = -Wall -O3 -Isrc -std=gnu99
-LDFLAGS  = -Wl,-q -nostdlib
+LDFLAGS  = -Wl,-q -nostdlib -Wl,-z,max-page-size=0x10000 -Wl,-z,common-page-size=0x10000 -Wl,--defsym=__sce_headroom=0x10000
 
 all: $(TARGET).skprx
 

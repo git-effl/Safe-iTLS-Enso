@@ -13,6 +13,7 @@ include("${VITASDK}/share/vita.cmake" REQUIRED)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wl,-q -Wall -O3")
+set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,-z,max-page-size=0x10000 -Wl,-z,common-page-size=0x10000 -Wl,--defsym=__sce_headroom=0x10000")
 
 set(TITLE_ID "ITLS00001")
 set(APP_TITLE "Safe-iTLS Companion")
