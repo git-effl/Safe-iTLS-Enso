@@ -45,7 +45,7 @@ $(TARGET).elf: $(OBJS)
 	$(CC) $(LDFLAGS) $^ $(LIBS) -o $@
 
 param.sfo:
-	vita-mksfoex -s TITLE_ID=$(TITLE_ID) -s CONTENT_ID=HB0001-$(TITLE_ID)_00-0000000000000000 "Safe-iTLS Companion" param.sfo
+	vita-mksfoex -s TITLE_ID=$(TITLE_ID) "Safe-iTLS Companion" param.sfo
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
