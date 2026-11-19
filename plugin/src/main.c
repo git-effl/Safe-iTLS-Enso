@@ -7,7 +7,7 @@
 #include "redirect.h"
 
 #define PLUGIN_NAME    "Safe-iTLS-Enso Kernel Plugin"
-#define PLUGIN_VERSION "1.1.1"
+#define PLUGIN_VERSION "1.2.0"
 
 /* Verified VitaSDK kernel library & function NIDs (FW 3.60 / 3.63-3.74) */
 #define NID_LIB_MODULEMGR_DRIVER      0xD4A60A52
@@ -149,10 +149,11 @@ int module_start(SceSize args, void *argp) {
     } else {
         ksceDebugPrintf("[Safe-iTLS] Storage medium: %s\n", status.base_dir);
         for (int i = 0; i < TARGET_FILE_COUNT; i++) {
-            ksceDebugPrintf("[Safe-iTLS] [%d/5] %s: %s\n",
+            ksceDebugPrintf("[Safe-iTLS] [%d/5] %s: uma0=%s ux0=%s\n",
                             i + 1,
                             status.items[i].card_filename,
-                            status.items[i].available ? "READY (CARD)" : "MISSING (VS0 FALLBACK)");
+                            status.items[i].uma0_available ? "READY" : "NO",
+                            status.items[i].ux0_available ? "READY" : "NO");
         }
     }
 

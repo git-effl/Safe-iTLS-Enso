@@ -1,8 +1,12 @@
 #include "storage.h"
 #include <psp2/io/dirent.h>
+#include <psp2/io/fcntl.h>
 #include <psp2/io/stat.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+#define COPY_CHUNK_SIZE (64 * 1024)
 
 bool storage_path_exists(const char *path) {
     if (!path || path[0] == '\0') {
@@ -13,6 +17,23 @@ bool storage_path_exists(const char *path) {
     memset(&stat, 0, sizeof(stat));
     int res = sceIoGetstat(path, &stat);
     return (res >= 0);
+}
+
+static bool partition_is_mounted(const char *dev_path) {
+    SceUID dfd = sceIoDopen(dev_path);
+    if (dfd >= 0) {
+        sceIoDclose(dfd);
+        return true;
+    }
+    return false;
+}
+
+void storage_probe_partitions(StorageAvailability *avail) {
+    if (!avail) {
+        return;
+    }
+    avail->uma0_mounted = partition_is_mounted("uma0:");
+    avail->ux0_mounted  = partition_is_mounted("ux0:");
 }
 
 int storage_make_dir_recursive(const char *dir_path) {
@@ -44,49 +65,105 @@ int storage_make_dir_recursive(const char *dir_path) {
     return sceIoMkdir(temp, 0777);
 }
 
-static uint64_t get_device_free_space(const char *dev_path) {
-    SceUID dfd = sceIoDopen(dev_path);
-    if (dfd >= 0) {
-        sceIoDclose(dfd);
-        return 1024ULL * 1024ULL * 512ULL; /* Accessible storage medium */
+int storage_configure_target(StorageMedium medium, StorageTarget *target) {
+    if (!target) {
+        return -1;
     }
-    return 0;
+    memset(target, 0, sizeof(StorageTarget));
+
+    if (medium == STORAGE_UMA0) {
+        target->medium = STORAGE_UMA0;
+        target->is_sd2vita = true;
+        snprintf(target->root_path, sizeof(target->root_path), "uma0:");
+        snprintf(target->itls_dir, sizeof(target->itls_dir), UMA0_ITLS_DIR);
+        if (partition_is_mounted("uma0:")) {
+            target->free_space_bytes = 1024ULL * 1024ULL * 512ULL;
+            return 0;
+        }
+        return -1;
+    }
+
+    if (medium == STORAGE_UX0) {
+        target->medium = STORAGE_UX0;
+        target->is_sd2vita = false;
+        snprintf(target->root_path, sizeof(target->root_path), "ux0:");
+        snprintf(target->itls_dir, sizeof(target->itls_dir), UX0_ITLS_DIR);
+        if (partition_is_mounted("ux0:")) {
+            target->free_space_bytes = 1024ULL * 1024ULL * 512ULL;
+            return 0;
+        }
+        return -1;
+    }
+
+    target->medium = STORAGE_UNKNOWN;
+    snprintf(target->itls_dir, sizeof(target->itls_dir), UX0_ITLS_DIR);
+    return -1;
 }
 
 int storage_detect_target(StorageTarget *target) {
     if (!target) {
         return -1;
     }
-    memset(target, 0, sizeof(StorageTarget));
 
     /* 1. Priority: Probe uma0: (SD2Vita Adapter / Secondary Mass Storage) */
-    SceUID uma_dir = sceIoDopen("uma0:");
-    if (uma_dir >= 0) {
-        sceIoDclose(uma_dir);
-        target->medium = STORAGE_UMA0;
-        target->is_sd2vita = true;
-        snprintf(target->root_path, sizeof(target->root_path), "uma0:");
-        snprintf(target->itls_dir, sizeof(target->itls_dir), "uma0:/data/itls");
-        target->free_space_bytes = get_device_free_space("uma0:");
+    if (storage_configure_target(STORAGE_UMA0, target) == 0) {
         return 0;
     }
 
     /* 2. Fallback: ux0: (Primary Sony Memory Card or Internal Storage) */
-    SceUID ux0_dir = sceIoDopen("ux0:");
-    if (ux0_dir >= 0) {
-        sceIoDclose(ux0_dir);
-        target->medium = STORAGE_UX0;
-        target->is_sd2vita = false;
-        snprintf(target->root_path, sizeof(target->root_path), "ux0:");
-        snprintf(target->itls_dir, sizeof(target->itls_dir), "ux0:/data/itls");
-        target->free_space_bytes = get_device_free_space("ux0:");
+    if (storage_configure_target(STORAGE_UX0, target) == 0) {
         return 0;
     }
 
-    /* Neither accessible */
     target->medium = STORAGE_UNKNOWN;
-    snprintf(target->itls_dir, sizeof(target->itls_dir), "ux0:/data/itls");
+    snprintf(target->itls_dir, sizeof(target->itls_dir), UX0_ITLS_DIR);
     return -1;
+}
+
+int storage_copy_file(const char *src_path, const char *dst_path) {
+    if (!src_path || !dst_path) {
+        return -1;
+    }
+
+    SceUID in_fd = sceIoOpen(src_path, SCE_O_RDONLY, 0);
+    if (in_fd < 0) {
+        return in_fd;
+    }
+
+    SceUID out_fd = sceIoOpen(dst_path, SCE_O_WRONLY | SCE_O_CREAT | SCE_O_TRUNC, 0777);
+    if (out_fd < 0) {
+        sceIoClose(in_fd);
+        return out_fd;
+    }
+
+    uint8_t *buf = (uint8_t *)malloc(COPY_CHUNK_SIZE);
+    if (!buf) {
+        sceIoClose(out_fd);
+        sceIoClose(in_fd);
+        return -1;
+    }
+
+    int result = 0;
+    for (;;) {
+        int r = sceIoRead(in_fd, buf, COPY_CHUNK_SIZE);
+        if (r < 0) {
+            result = r;
+            break;
+        }
+        if (r == 0) {
+            break;
+        }
+        int w = sceIoWrite(out_fd, buf, (SceSize)r);
+        if (w != r) {
+            result = -1;
+            break;
+        }
+    }
+
+    free(buf);
+    sceIoClose(out_fd);
+    sceIoClose(in_fd);
+    return result;
 }
 
 void storage_format_size(uint64_t bytes, char *out_str, size_t out_max) {

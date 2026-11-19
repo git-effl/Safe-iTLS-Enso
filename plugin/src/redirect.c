@@ -12,6 +12,8 @@ static RedirectStatus s_status = {
             .orig_pattern_1 = "vs0:sys/external/libssl.suprx",
             .orig_pattern_2 = "vs0:/sys/external/libssl.suprx",
             .card_filename  = "libssl.suprx",
+            .uma0_available = false,
+            .ux0_available  = false,
             .available      = false,
             .redirect_count = 0
         },
@@ -19,6 +21,8 @@ static RedirectStatus s_status = {
             .orig_pattern_1 = "vs0:sys/external/libhttp.suprx",
             .orig_pattern_2 = "vs0:/sys/external/libhttp.suprx",
             .card_filename  = "libhttp.suprx",
+            .uma0_available = false,
+            .ux0_available  = false,
             .available      = false,
             .redirect_count = 0
         },
@@ -26,6 +30,8 @@ static RedirectStatus s_status = {
             .orig_pattern_1 = "vs0:data/external/webcore/ScePsp2Compat.suprx",
             .orig_pattern_2 = "vs0:/data/external/webcore/ScePsp2Compat.suprx",
             .card_filename  = "ScePsp2Compat.suprx",
+            .uma0_available = false,
+            .ux0_available  = false,
             .available      = false,
             .redirect_count = 0
         },
@@ -33,6 +39,8 @@ static RedirectStatus s_status = {
             .orig_pattern_1 = "vs0:sys/external/np_commerce2.suprx",
             .orig_pattern_2 = "vs0:/sys/external/np_commerce2.suprx",
             .card_filename  = "np_commerce2.suprx",
+            .uma0_available = false,
+            .ux0_available  = false,
             .available      = false,
             .redirect_count = 0
         },
@@ -40,6 +48,8 @@ static RedirectStatus s_status = {
             .orig_pattern_1 = "vs0:data/external/cert/CA_LIST.cer",
             .orig_pattern_2 = "vs0:/data/external/cert/CA_LIST.cer",
             .card_filename  = "CA_LIST.cer",
+            .uma0_available = false,
+            .ux0_available  = false,
             .available      = false,
             .redirect_count = 0
         }
@@ -59,28 +69,6 @@ static bool file_exists_kernel(const char *path) {
     return (res >= 0 && stat.st_size > 0);
 }
 
-static bool probe_directory(const char *dir, RedirectTarget target) {
-    int available_count = 0;
-    char test_path[MAX_PATH_LEN];
-
-    for (int i = 0; i < TARGET_FILE_COUNT; i++) {
-        snprintf(test_path, sizeof(test_path), "%s/%s", dir, s_status.items[i].card_filename);
-        bool exists = file_exists_kernel(test_path);
-        s_status.items[i].available = exists;
-        if (exists) {
-            available_count++;
-        }
-    }
-
-    if (available_count > 0) {
-        s_status.active_target = target;
-        snprintf(s_status.base_dir, sizeof(s_status.base_dir), "%s", dir);
-        return true;
-    }
-
-    return false;
-}
-
 void redirect_refresh_storage(void) {
     if (s_in_probe) {
         return;
@@ -90,18 +78,36 @@ void redirect_refresh_storage(void) {
     s_status.active_target = REDIRECT_TARGET_NONE;
     s_status.base_dir[0] = '\0';
 
+    int uma0_count = 0;
+    int ux0_count = 0;
+    char test_path[MAX_PATH_LEN];
+
     for (int i = 0; i < TARGET_FILE_COUNT; i++) {
-        s_status.items[i].available = false;
+        snprintf(test_path, sizeof(test_path), "%s/%s", SD2VITA_ITLS_DIR, s_status.items[i].card_filename);
+        bool on_uma0 = file_exists_kernel(test_path);
+
+        snprintf(test_path, sizeof(test_path), "%s/%s", MEMCARD_ITLS_DIR, s_status.items[i].card_filename);
+        bool on_ux0 = file_exists_kernel(test_path);
+
+        s_status.items[i].uma0_available = on_uma0;
+        s_status.items[i].ux0_available  = on_ux0;
+        s_status.items[i].available      = (on_uma0 || on_ux0);
+
+        if (on_uma0) uma0_count++;
+        if (on_ux0)  ux0_count++;
     }
 
-    /* 1. Priority: Probe SD2Vita (uma0:data/itls) */
-    if (probe_directory(SD2VITA_ITLS_DIR, REDIRECT_TARGET_SD2VITA)) {
-        s_in_probe = 0;
-        return;
+    if (uma0_count > 0 && ux0_count > 0) {
+        s_status.active_target = REDIRECT_TARGET_BOTH;
+        snprintf(s_status.base_dir, sizeof(s_status.base_dir), "%s + %s", SD2VITA_ITLS_DIR, MEMCARD_ITLS_DIR);
+    } else if (uma0_count > 0) {
+        s_status.active_target = REDIRECT_TARGET_SD2VITA;
+        snprintf(s_status.base_dir, sizeof(s_status.base_dir), "%s", SD2VITA_ITLS_DIR);
+    } else if (ux0_count > 0) {
+        s_status.active_target = REDIRECT_TARGET_MEMCARD;
+        snprintf(s_status.base_dir, sizeof(s_status.base_dir), "%s", MEMCARD_ITLS_DIR);
     }
 
-    /* 2. Fallback: Probe Official Memory Card (ux0:data/itls) */
-    probe_directory(MEMCARD_ITLS_DIR, REDIRECT_TARGET_MEMCARD);
     s_in_probe = 0;
 }
 
@@ -142,22 +148,31 @@ bool redirect_resolve_path(const char *orig_path, char *output_path, size_t max_
 
     /*
      * At *KERNEL boot time, uma0:/ux0: may not be mounted when module_start runs.
-     * Lazily probe storage on the first matching target request.
+     * Lazily probe both partitions on demand if not yet ready.
      */
-    if (s_status.active_target == REDIRECT_TARGET_NONE) {
+    if (!s_status.items[matched_idx].available) {
         redirect_refresh_storage();
     }
 
-    if (s_status.active_target != REDIRECT_TARGET_NONE &&
-        s_status.items[matched_idx].available) {
+    /* Priority 1: uma0:data/itls (SD2Vita / USB) */
+    if (s_status.items[matched_idx].uma0_available) {
         snprintf(output_path, max_len, "%s/%s",
-                 s_status.base_dir, s_status.items[matched_idx].card_filename);
+                 SD2VITA_ITLS_DIR, s_status.items[matched_idx].card_filename);
         s_status.items[matched_idx].redirect_count++;
         s_status.total_redirects++;
         return true;
     }
 
-    /* Target file missing or card ejected; safe fallback to original vs0: */
+    /* Priority 2: ux0:data/itls (Memory Card / Internal Storage) */
+    if (s_status.items[matched_idx].ux0_available) {
+        snprintf(output_path, max_len, "%s/%s",
+                 MEMCARD_ITLS_DIR, s_status.items[matched_idx].card_filename);
+        s_status.items[matched_idx].redirect_count++;
+        s_status.total_redirects++;
+        return true;
+    }
+
+    /* Target file missing on both uma0: and ux0:; safe fallback to original vs0: */
     s_status.fallback_count++;
     return false;
 }

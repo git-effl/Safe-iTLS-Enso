@@ -27,14 +27,17 @@ typedef struct {
     const char *orig_pattern_1; /* e.g. "vs0:sys/external/libssl.suprx" */
     const char *orig_pattern_2; /* with leading slash e.g. "vs0:/sys/external/libssl.suprx" */
     const char *card_filename;  /* e.g. "libssl.suprx" */
-    bool available;
+    bool uma0_available;
+    bool ux0_available;
+    bool available;             /* true if present on uma0: OR ux0: */
     uint32_t redirect_count;
 } RedirectItem;
 
 typedef enum {
     REDIRECT_TARGET_NONE = 0,
     REDIRECT_TARGET_SD2VITA,   /* uma0:data/itls */
-    REDIRECT_TARGET_MEMCARD    /* ux0:data/itls */
+    REDIRECT_TARGET_MEMCARD,   /* ux0:data/itls */
+    REDIRECT_TARGET_BOTH       /* Both uma0:data/itls and ux0:data/itls available */
 } RedirectTarget;
 
 typedef struct {
@@ -46,15 +49,14 @@ typedef struct {
 } RedirectStatus;
 
 /**
- * @brief Initialize redirect table and probe storage card.
- * Priority: uma0:data/itls -> ux0:data/itls.
+ * @brief Initialize redirect table and probe both uma0:data/itls and ux0:data/itls.
  */
 int redirect_init(void);
 
 /**
  * @brief Checks if given path targets one of the EXACT 5 allowed files.
- * Lazily re-probes storage if card mounted after early kernel boot.
- * If verified on card, rewrites to card path. Otherwise returns false.
+ * Checks uma0:data/itls first, automatically falls back to ux0:data/itls,
+ * and falls back safely to vs0: if neither partition holds the file.
  */
 bool redirect_resolve_path(const char *orig_path, char *output_path, size_t max_len);
 
@@ -64,7 +66,7 @@ bool redirect_resolve_path(const char *orig_path, char *output_path, size_t max_
 void redirect_get_status(RedirectStatus *status);
 
 /**
- * @brief Re-probe storage card (re-entrancy safe).
+ * @brief Re-probe both uma0: and ux0: storage partitions (re-entrancy safe).
  */
 void redirect_refresh_storage(void);
 

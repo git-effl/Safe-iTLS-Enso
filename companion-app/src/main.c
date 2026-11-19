@@ -13,17 +13,30 @@
 #include "pup_extractor.h"
 
 typedef enum {
-    INSTALLER_STATE_READY = 0,
+    INSTALLER_STATE_SELECT_PARTITION = 0,
     INSTALLER_STATE_DOWNLOADING,
     INSTALLER_STATE_EXTRACTING_HW,
+    INSTALLER_STATE_MIRRORING,
     INSTALLER_STATE_SUCCESS,
     INSTALLER_STATE_ERROR
 } InstallerState;
 
-static InstallerState s_state = INSTALLER_STATE_READY;
-static StorageTarget s_storage;
+#define PARTITION_OPTION_COUNT 3
+
+static InstallerState s_state = INSTALLER_STATE_SELECT_PARTITION;
+static StorageAvailability s_avail;
+static StoragePartitionChoice s_choice = PARTITION_CHOICE_BOTH;
 static char s_pup_path[PATH_MAX_LEN];
-static char s_status_line[128] = "Press (X) to Download & Install Firmware Modules | (START) to Exit";
+static char s_status_line[128] = "Use UP/DOWN to choose partition, then press (X) to Install.";
+
+static const char *get_choice_label(StoragePartitionChoice choice) {
+    switch (choice) {
+        case PARTITION_CHOICE_BOTH: return "Both uma0: and ux0: (Dual Redundancy)";
+        case PARTITION_CHOICE_UMA0: return "uma0:/data/itls only (SD2Vita / USB)";
+        case PARTITION_CHOICE_UX0:  return "ux0:/data/itls only (Memory Card / Primary)";
+        default:                    return "Unknown";
+    }
+}
 
 static void on_download_progress(const DownloadProgress *progress, void *userdata) {
     (void)userdata;
@@ -64,51 +77,139 @@ static void on_extract_progress(const PupExtractProgress *progress, void *userda
     }
 }
 
-static void draw_ready_screen(void) {
+static void draw_partition_menu(void) {
     psvDebugScreenClear(0x000000);
     psvDebugScreenPrintf("***************************************************\n");
-    psvDebugScreenPrintf("  Safe-iTLS-Enso Firmware Installer (v1.1.1)\n");
+    psvDebugScreenPrintf("  Safe-iTLS-Enso Firmware Installer (v1.2.0)\n");
     psvDebugScreenPrintf("  Official Sony Server Download & Hardware Decrypt\n");
     psvDebugScreenPrintf("***************************************************\n\n");
-    psvDebugScreenPrintf(" Storage Target:  %s (%s)\n",
-                         s_storage.itls_dir,
-                         s_storage.is_sd2vita ? "SD2Vita uma0:" : "Official Card ux0:");
     psvDebugScreenPrintf(" Decryption:      Hardware Bigmac DMAC5 (Keyslot 0x20)\n");
     psvDebugScreenPrintf(" Software Keys:   NONE (0%% key exposure)\n");
     psvDebugScreenPrintf(" vs0: Safety:     100%% Untouched (Zero vs0: writes)\n\n");
+
+    psvDebugScreenPrintf(" Detected Storage Partitions:\n");
+    psvDebugScreenPrintf("   uma0: (SD2Vita / USB) : %s\n",
+                         s_avail.uma0_mounted ? "MOUNTED" : "NOT MOUNTED");
+    psvDebugScreenPrintf("   ux0:  (Memory Card)   : %s\n\n",
+                         s_avail.ux0_mounted ? "MOUNTED" : "NOT MOUNTED");
+
+    psvDebugScreenPrintf(" Which partition do you want to install to?\n");
+    psvDebugScreenPrintf("   %s [1] Both uma0: and ux0: (uma0:/data/itls + ux0:/data/itls)\n",
+                         (s_choice == PARTITION_CHOICE_BOTH) ? ">>" : "  ");
+    psvDebugScreenPrintf("   %s [2] uma0: only          (uma0:/data/itls)\n",
+                         (s_choice == PARTITION_CHOICE_UMA0) ? ">>" : "  ");
+    psvDebugScreenPrintf("   %s [3] ux0: only           (ux0:/data/itls)\n\n",
+                         (s_choice == PARTITION_CHOICE_UX0) ? ">>" : "  ");
+
     psvDebugScreenPrintf(" Exact 5 Target Files to Extract:\n");
     psvDebugScreenPrintf("   1. vs0:sys/external/libssl.suprx\n");
     psvDebugScreenPrintf("   2. vs0:sys/external/libhttp.suprx\n");
     psvDebugScreenPrintf("   3. vs0:/data/external/webcore/ScePsp2Compat.suprx\n");
     psvDebugScreenPrintf("   4. vs0:sys/external/np_commerce2.suprx\n");
     psvDebugScreenPrintf("   5. vs0:data/external/cert/CA_LIST.cer\n\n");
+
     psvDebugScreenPrintf(" Controls:\n");
-    psvDebugScreenPrintf("   [X]     - Download from Sony & Extract Using Hardware\n");
-    psvDebugScreenPrintf("   [START] - Exit to LiveArea\n\n");
+    psvDebugScreenPrintf("   [UP / DOWN] - Select Target Partition\n");
+    psvDebugScreenPrintf("   [X]         - Download from Sony & Extract Using Hardware\n");
+    psvDebugScreenPrintf("   [START]     - Exit to LiveArea\n\n");
     psvDebugScreenPrintf(" Status: %s\n", s_status_line);
 }
 
-static void run_installer(void) {
+static int mirror_targets_to_partition(const char *src_dir, const char *dst_dir) {
+    storage_make_dir_recursive(dst_dir);
+
+    int copied = 0;
+    for (int i = 0; i < TARGET_FILE_COUNT; i++) {
+        const char *filename = pup_get_target_filename(i);
+        if (!filename) {
+            continue;
+        }
+
+        char src_file[PATH_MAX_LEN];
+        char dst_file[PATH_MAX_LEN];
+        snprintf(src_file, sizeof(src_file), "%s/%s", src_dir, filename);
+        snprintf(dst_file, sizeof(dst_file), "%s/%s", dst_dir, filename);
+
+        int res = storage_copy_file(src_file, dst_file);
+        if (res < 0) {
+            psvDebugScreenPrintf("[-] Failed to mirror %s -> %s (0x%08X)\n",
+                                 src_file, dst_file, (unsigned int)res);
+            return res;
+        }
+        psvDebugScreenPrintf("    [%d/5] Copied %s -> %s\n", i + 1, filename, dst_dir);
+        copied++;
+    }
+
+    return (copied == TARGET_FILE_COUNT) ? 0 : -1;
+}
+
+static void run_installer(StoragePartitionChoice choice) {
+    /* Refresh partition mount state right before installing */
+    storage_probe_partitions(&s_avail);
+
+    bool install_uma0 = (choice == PARTITION_CHOICE_BOTH || choice == PARTITION_CHOICE_UMA0);
+    bool install_ux0  = (choice == PARTITION_CHOICE_BOTH || choice == PARTITION_CHOICE_UX0);
+
+    if (choice == PARTITION_CHOICE_UMA0 && !s_avail.uma0_mounted) {
+        snprintf(s_status_line, sizeof(s_status_line),
+                 "uma0: is NOT mounted! Select ux0: or insert SD2Vita.");
+        draw_partition_menu();
+        return;
+    }
+
+    if (choice == PARTITION_CHOICE_UX0 && !s_avail.ux0_mounted) {
+        snprintf(s_status_line, sizeof(s_status_line),
+                 "ux0: is NOT mounted! Check your memory card.");
+        draw_partition_menu();
+        return;
+    }
+
+    if (choice == PARTITION_CHOICE_BOTH && !s_avail.uma0_mounted && !s_avail.ux0_mounted) {
+        snprintf(s_status_line, sizeof(s_status_line),
+                 "Neither uma0: nor ux0: is mounted!");
+        draw_partition_menu();
+        return;
+    }
+
+    /* Pick primary working partition (download & hardware-extract once) and optional mirror */
+    StorageTarget primary_target;
+    StorageTarget secondary_target;
+    bool has_secondary = false;
+
+    if (install_uma0 && s_avail.uma0_mounted) {
+        storage_configure_target(STORAGE_UMA0, &primary_target);
+        if (install_ux0 && s_avail.ux0_mounted) {
+            storage_configure_target(STORAGE_UX0, &secondary_target);
+            has_secondary = true;
+        }
+    } else {
+        storage_configure_target(STORAGE_UX0, &primary_target);
+    }
+
     psvDebugScreenClear(0x000000);
     psvDebugScreenPrintf("===================================================\n");
     psvDebugScreenPrintf(" Safe-iTLS-Enso Firmware Installer\n");
     psvDebugScreenPrintf(" Zero vs0: Modifications - Hardware Bigmac Decrypt\n");
     psvDebugScreenPrintf("===================================================\n\n");
 
-    /* Step 1: Storage Detection & Directory Creation */
-    psvDebugScreenPrintf("[*] Detecting storage medium...\n");
-    if (storage_detect_target(&s_storage) < 0) {
-        psvDebugScreenPrintf("[-] Warning: Failed to query storage! Defaulting to ux0:\n");
-        snprintf(s_storage.itls_dir, sizeof(s_storage.itls_dir), "ux0:/data/itls");
+    psvDebugScreenPrintf("[*] Selected Mode: %s\n", get_choice_label(choice));
+    if (choice == PARTITION_CHOICE_BOTH && !has_secondary) {
+        psvDebugScreenPrintf("[!] Notice: Only %s is currently mounted; installing there.\n",
+                             primary_target.root_path);
     }
-    storage_make_dir_recursive(s_storage.itls_dir);
-    psvDebugScreenPrintf("[+] Target Directory: %s (%s)\n\n",
-                         s_storage.itls_dir,
-                         s_storage.is_sd2vita ? "SD2Vita uma0:" : "Memory Card ux0:");
 
-    snprintf(s_pup_path, sizeof(s_pup_path), "%s/PSVUPDAT.PUP", s_storage.itls_dir);
+    /* Step 1: Ensure destination directory exists before streaming PUP */
+    storage_make_dir_recursive(primary_target.itls_dir);
+    psvDebugScreenPrintf("[+] Primary Output:   %s\n", primary_target.itls_dir);
+    if (has_secondary) {
+        storage_make_dir_recursive(secondary_target.itls_dir);
+        psvDebugScreenPrintf("[+] Secondary Output: %s\n", secondary_target.itls_dir);
+    }
+    psvDebugScreenPrintf("\n");
 
-    /* Step 2: Download Sony Official PUP */
+    snprintf(s_pup_path, sizeof(s_pup_path), "%s/PSVUPDAT.PUP", primary_target.itls_dir);
+
+    /* Step 2: Download Sony Official PUP once */
     psvDebugScreenPrintf("[*] Downloading official Sony update PUP package...\n");
     psvDebugScreenPrintf("    Server: deu01.psv.update.playstation.net\n");
     s_state = INSTALLER_STATE_DOWNLOADING;
@@ -116,14 +217,14 @@ static void run_installer(void) {
     int dl_res = downloader_fetch_pup(OFFICIAL_PUP_URL, s_pup_path, on_download_progress, NULL);
     if (dl_res < 0) {
         psvDebugScreenPrintf("[-] Download failed! Please check your network connection.\n");
-        psvDebugScreenPrintf("Press START, (X), or (O) to exit to LiveArea.\n");
+        psvDebugScreenPrintf("Press [TRIANGLE] for Partition Menu, or [START]/[O] to Exit.\n");
         s_state = INSTALLER_STATE_ERROR;
         return;
     }
     psvDebugScreenPrintf("[+] Firmware PUP downloaded successfully.\n\n");
 
     /* Step 3: Hardware-Assisted Extraction (NO SOFTWARE AES KEYS) */
-    psvDebugScreenPrintf("[*] Initializing PS Vita Bigmac Hardware Crypto DMA Engine...\n");
+    psvDebugScreenPrintf("[*] Initializing PS Vita Bigmac DMAC5 Hardware Engine...\n");
     psvDebugScreenPrintf("[*] Using Hardware Keyslot 0x20 (Zero software AES keys)...\n");
     psvDebugScreenPrintf("[*] Extracting ONLY the 5 required system files:\n");
     psvDebugScreenPrintf("    1. vs0:sys/external/libssl.suprx\n");
@@ -134,28 +235,46 @@ static void run_installer(void) {
 
     s_state = INSTALLER_STATE_EXTRACTING_HW;
 
-    int ext_res = pup_extract_target_modules(s_pup_path, s_storage.itls_dir, on_extract_progress, NULL);
+    int ext_res = pup_extract_target_modules(s_pup_path, primary_target.itls_dir, on_extract_progress, NULL);
     if (ext_res < 0) {
         psvDebugScreenPrintf("[-] Extraction failed.\n");
-        psvDebugScreenPrintf("Press START, (X), or (O) to exit to LiveArea.\n");
+        psvDebugScreenPrintf("Press [TRIANGLE] for Partition Menu, or [START]/[O] to Exit.\n");
         s_state = INSTALLER_STATE_ERROR;
         return;
     }
 
-    psvDebugScreenPrintf("\n[+] Extraction & Decryption complete!\n");
-    psvDebugScreenPrintf("[+] Temporary PUP file deleted to free storage space.\n\n");
-    psvDebugScreenPrintf("---------------------------------------------------\n");
-    psvDebugScreenPrintf(" All 5 modules are installed in: %s\n", s_storage.itls_dir);
-    psvDebugScreenPrintf(" - libssl.suprx          (Modern TLS 1.2 stack)\n");
-    psvDebugScreenPrintf(" - libhttp.suprx         (Modern HTTP client)\n");
-    psvDebugScreenPrintf(" - ScePsp2Compat.suprx   (WebCore TLS compatibility)\n");
-    psvDebugScreenPrintf(" - np_commerce2.suprx    (PS Store TLS commerce)\n");
-    psvDebugScreenPrintf(" - CA_LIST.cer           (Root certificate store)\n");
+    psvDebugScreenPrintf("\n[+] Hardware extraction complete into %s!\n", primary_target.itls_dir);
+    psvDebugScreenPrintf("[+] Temporary PUP file deleted to free storage space.\n");
+
+    /* Step 4: Mirror the 5 extracted targets to the second partition if Both was chosen */
+    if (has_secondary) {
+        s_state = INSTALLER_STATE_MIRRORING;
+        psvDebugScreenPrintf("\n[*] Mirroring the 5 extracted files to %s...\n", secondary_target.itls_dir);
+        int mir_res = mirror_targets_to_partition(primary_target.itls_dir, secondary_target.itls_dir);
+        if (mir_res < 0) {
+            psvDebugScreenPrintf("[-] Warning: Failed to mirror files to %s.\n", secondary_target.itls_dir);
+            psvDebugScreenPrintf("Press [TRIANGLE] for Partition Menu, or [START]/[O] to Exit.\n");
+            s_state = INSTALLER_STATE_ERROR;
+            return;
+        }
+        psvDebugScreenPrintf("[+] Mirrored all 5 files to %s successfully!\n", secondary_target.itls_dir);
+    }
+
+    psvDebugScreenPrintf("\n---------------------------------------------------\n");
+    if (has_secondary) {
+        psvDebugScreenPrintf(" All 5 modules installed on BOTH partitions:\n");
+        psvDebugScreenPrintf("   - %s\n", primary_target.itls_dir);
+        psvDebugScreenPrintf("   - %s\n", secondary_target.itls_dir);
+    } else {
+        psvDebugScreenPrintf(" All 5 modules installed in: %s\n", primary_target.itls_dir);
+    }
+    psvDebugScreenPrintf(" Files: libssl.suprx, libhttp.suprx, ScePsp2Compat.suprx,\n");
+    psvDebugScreenPrintf("        np_commerce2.suprx, CA_LIST.cer\n");
     psvDebugScreenPrintf("---------------------------------------------------\n\n");
     psvDebugScreenPrintf("Next step: Ensure ur0:tai/config.txt contains:\n");
     psvDebugScreenPrintf("  *KERNEL\n");
     psvDebugScreenPrintf("  ur0:tai/itls.skprx\n\n");
-    psvDebugScreenPrintf("Press START or (O) to exit to LiveArea.\n");
+    psvDebugScreenPrintf("Press [TRIANGLE] to choose another partition, or [START]/[O] to Exit.\n");
 
     s_state = INSTALLER_STATE_SUCCESS;
 }
@@ -169,13 +288,22 @@ int main(int argc, char *argv[]) {
     scePowerSetBusClockFrequency(222);
 
     psvDebugScreenInit();
-    storage_detect_target(&s_storage);
+    storage_probe_partitions(&s_avail);
+
+    /* Default to Both when both are mounted, otherwise preselect the mounted partition */
+    if (s_avail.uma0_mounted && s_avail.ux0_mounted) {
+        s_choice = PARTITION_CHOICE_BOTH;
+    } else if (s_avail.uma0_mounted) {
+        s_choice = PARTITION_CHOICE_UMA0;
+    } else {
+        s_choice = PARTITION_CHOICE_UX0;
+    }
 
     SceCtrlData pad, old_pad;
     memset(&pad, 0, sizeof(pad));
     memset(&old_pad, 0, sizeof(old_pad));
 
-    draw_ready_screen();
+    draw_partition_menu();
 
     bool running = true;
     while (running) {
@@ -183,14 +311,28 @@ int main(int argc, char *argv[]) {
         sceCtrlPeekBufferPositive(0, &pad, 1);
         uint32_t pressed = pad.buttons & ~old_pad.buttons;
 
-        if (s_state == INSTALLER_STATE_READY) {
-            if (pressed & SCE_CTRL_CROSS) {
-                run_installer();
+        if (s_state == INSTALLER_STATE_SELECT_PARTITION) {
+            if (pressed & (SCE_CTRL_UP | SCE_CTRL_LTRIGGER)) {
+                s_choice = (StoragePartitionChoice)(((int)s_choice + PARTITION_OPTION_COUNT - 1) % PARTITION_OPTION_COUNT);
+                snprintf(s_status_line, sizeof(s_status_line), "Selected: %s", get_choice_label(s_choice));
+                draw_partition_menu();
+            } else if (pressed & (SCE_CTRL_DOWN | SCE_CTRL_RTRIGGER)) {
+                s_choice = (StoragePartitionChoice)(((int)s_choice + 1) % PARTITION_OPTION_COUNT);
+                snprintf(s_status_line, sizeof(s_status_line), "Selected: %s", get_choice_label(s_choice));
+                draw_partition_menu();
+            } else if (pressed & SCE_CTRL_CROSS) {
+                run_installer(s_choice);
             } else if (pressed & SCE_CTRL_START) {
                 running = false;
             }
         } else if (s_state == INSTALLER_STATE_SUCCESS || s_state == INSTALLER_STATE_ERROR) {
-            if (pressed & (SCE_CTRL_CROSS | SCE_CTRL_CIRCLE | SCE_CTRL_START)) {
+            if (pressed & SCE_CTRL_TRIANGLE) {
+                storage_probe_partitions(&s_avail);
+                snprintf(s_status_line, sizeof(s_status_line),
+                         "Use UP/DOWN to choose partition, then press (X) to Install.");
+                s_state = INSTALLER_STATE_SELECT_PARTITION;
+                draw_partition_menu();
+            } else if (pressed & (SCE_CTRL_CIRCLE | SCE_CTRL_START)) {
                 running = false;
             }
         }
