@@ -25,7 +25,6 @@ target_link_libraries(itls
   taihenForKernel_stub
   SceIofilemgrForDriver_stub
   SceSysclibForDriver_stub
-  SceDebugForDriver_stub
 )
 
 vita_create_self(itls.skprx itls CONFIG exports.yml UNSAFE)

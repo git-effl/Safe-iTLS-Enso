@@ -301,7 +301,7 @@ int downloader_fetch_pup(const char *url, const char *destination_path,
         int req_len = snprintf(req_buf, sizeof(req_buf),
                                "GET %s HTTP/1.1\r\n"
                                "Host: %s\r\n"
-                               "User-Agent: Safe-iTLS-Companion/1.2.3\r\n"
+                               "User-Agent: Safe-iTLS-Companion/1.3.0\r\n"
                                "Accept: */*\r\n"
                                "Connection: close\r\n"
                                "\r\n",

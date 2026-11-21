@@ -1,13 +1,12 @@
 #include <psp2kern/kernel/modulemgr.h>
 #include <psp2kern/kernel/sysmem.h>
 #include <psp2kern/kernel/sysclib.h>
-#include <psp2kern/kernel/debug.h>
 #include <psp2kern/io/fcntl.h>
 #include <taihen.h>
 #include "redirect.h"
 
 #define PLUGIN_NAME    "Safe-iTLS-Enso Kernel Plugin"
-#define PLUGIN_VERSION "1.2.0"
+#define PLUGIN_VERSION "1.3.0"
 
 /* Verified VitaSDK kernel library & function NIDs (FW 3.60 / 3.63-3.74) */
 #define NID_LIB_MODULEMGR_DRIVER      0xD4A60A52
@@ -45,8 +44,6 @@ static SceUID ksceKernelLoadStartModuleForPid_patched(
     char redirected_path[MAX_PATH_LEN];
 
     if (path && redirect_resolve_path(path, redirected_path, sizeof(redirected_path))) {
-        ksceDebugPrintf("[Safe-iTLS] Redirecting module: %s -> %s (pid: 0x%08X)\n",
-                        path, redirected_path, (unsigned int)pid);
         return TAI_CONTINUE(SceUID, s_ref_load_start_mod,
                             pid, redirected_path, args, argp, flags, option, status);
     }
@@ -66,8 +63,6 @@ static SceUID ksceKernelLoadStartSharedModuleForPid_patched(
     char redirected_path[MAX_PATH_LEN];
 
     if (path && redirect_resolve_path(path, redirected_path, sizeof(redirected_path))) {
-        ksceDebugPrintf("[Safe-iTLS] Redirecting shared module: %s -> %s (pid: 0x%08X)\n",
-                        path, redirected_path, (unsigned int)pid);
         return TAI_CONTINUE(SceUID, s_ref_load_start_shared_mod,
                             pid, redirected_path, args, argp, flags, option, status);
     }
@@ -86,8 +81,6 @@ static SceUID ksceKernelLoadModuleForPid_patched(
     char redirected_path[MAX_PATH_LEN];
 
     if (path && redirect_resolve_path(path, redirected_path, sizeof(redirected_path))) {
-        ksceDebugPrintf("[Safe-iTLS] Redirecting load module: %s -> %s (pid: 0x%08X)\n",
-                        path, redirected_path, (unsigned int)pid);
         return TAI_CONTINUE(SceUID, s_ref_load_mod,
                             pid, redirected_path, flags, option);
     }
@@ -104,7 +97,6 @@ static SceUID ksceIoOpen_patched(const char *file, int flags, SceMode mode) {
     char redirected_file[MAX_PATH_LEN];
 
     if (file && redirect_resolve_path(file, redirected_file, sizeof(redirected_file))) {
-        ksceDebugPrintf("[Safe-iTLS] Redirecting ksceIoOpen: %s -> %s\n", file, redirected_file);
         return TAI_CONTINUE(SceUID, s_ref_io_open, redirected_file, flags, mode);
     }
 
@@ -119,8 +111,6 @@ static SceUID ksceIoOpenForPid_patched(SceUID pid, const char *file, int flags, 
     char redirected_file[MAX_PATH_LEN];
 
     if (file && redirect_resolve_path(file, redirected_file, sizeof(redirected_file))) {
-        ksceDebugPrintf("[Safe-iTLS] Redirecting ksceIoOpenForPid: %s -> %s (pid: 0x%08X)\n",
-                        file, redirected_file, (unsigned int)pid);
         return TAI_CONTINUE(SceUID, s_ref_io_open_for_pid, pid, redirected_file, flags, mode);
     }
 
@@ -133,29 +123,8 @@ int module_start(SceSize args, void *argp) {
     (void)args;
     (void)argp;
 
-    ksceDebugPrintf("===================================================\n");
-    ksceDebugPrintf(" %s (v%s)\n", PLUGIN_NAME, PLUGIN_VERSION);
-    ksceDebugPrintf(" Strict 5-Target TLS Redirection (Zero vs0: writes)\n");
-    ksceDebugPrintf("===================================================\n");
-
     /* Initial storage card probe (uma0: -> ux0:; lazily re-probed if mounted later) */
     redirect_init();
-
-    RedirectStatus status;
-    redirect_get_status(&status);
-
-    if (status.active_target == REDIRECT_TARGET_NONE) {
-        ksceDebugPrintf("[Safe-iTLS] Storage not ready yet or no modules found; will lazy-probe on demand.\n");
-    } else {
-        ksceDebugPrintf("[Safe-iTLS] Storage medium: %s\n", status.base_dir);
-        for (int i = 0; i < TARGET_FILE_COUNT; i++) {
-            ksceDebugPrintf("[Safe-iTLS] [%d/5] %s: uma0=%s ux0=%s\n",
-                            i + 1,
-                            status.items[i].card_filename,
-                            status.items[i].uma0_available ? "READY" : "NO",
-                            status.items[i].ux0_available ? "READY" : "NO");
-        }
-    }
 
     /* Hook SceKernelModulemgr -> SceModulemgrForDriver exports */
     s_hook_load_start_mod = taiHookFunctionExportForKernel(
@@ -215,13 +184,6 @@ int module_start(SceSize args, void *argp) {
         ksceIoOpenForPid_patched
     );
 
-    ksceDebugPrintf("[Safe-iTLS] Hooks: LoadStart=0x%08X Shared=0x%08X Load=0x%08X IoOpen=0x%08X IoOpenPid=0x%08X\n",
-                    (unsigned int)s_hook_load_start_mod,
-                    (unsigned int)s_hook_load_start_shared_mod,
-                    (unsigned int)s_hook_load_mod,
-                    (unsigned int)s_hook_io_open,
-                    (unsigned int)s_hook_io_open_for_pid);
-
     return SCE_KERNEL_START_SUCCESS;
 }
 
@@ -254,6 +216,5 @@ int module_stop(SceSize args, void *argp) {
         s_hook_io_open_for_pid = -1;
     }
 
-    ksceDebugPrintf("[Safe-iTLS] Kernel plugin unloaded.\n");
     return SCE_KERNEL_STOP_SUCCESS;
 }

@@ -8,8 +8,7 @@ OBJS     = src/main.o src/redirect.o
 
 LIBS     = -ltaihenForKernel_stub \
            -lSceIofilemgrForDriver_stub \
-           -lSceSysclibForDriver_stub \
-           -lSceDebugForDriver_stub
+           -lSceSysclibForDriver_stub
 
 PREFIX   = arm-vita-eabi
 CC       = $(PREFIX)-gcc
